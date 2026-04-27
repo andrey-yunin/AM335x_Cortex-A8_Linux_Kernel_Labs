@@ -14,6 +14,7 @@
 - BeagleBone Black загружается с microSD;
 - UART debug console работает через USB-UART адаптер;
 - вход в Debian выполнен пользователем `andrey`;
+- U-Boot environment изучен без изменения настроек;
 - eMMC обнаружена, но не изменялась.
 
 Используемый образ:
@@ -57,6 +58,28 @@ mmcblk1      встроенная eMMC, пока не трогаем
 ```text
 console=ttyS0,115200n8 root=/dev/mmcblk0p3 ro rootfstype=ext4 rootwait
 ```
+
+Что подтверждено в U-Boot:
+
+```text
+mmc 0      microSD
+mmc 0:1    BOOT/FAT, sysconf.txt
+mmc 0:2    swap
+mmc 0:3    rootfs/ext4, /boot/uEnv.txt, kernel, DTB, initrd
+bootdelay  0
+```
+
+Что U-Boot загружает в RAM перед стартом Linux:
+
+```text
+kernel image
+final Device Tree Blob
+initrd / initramfs
+kernel command line
+```
+
+Root filesystem целиком в RAM не загружается. Linux монтирует его с
+`/dev/mmcblk0p3`.
 
 ## Быстрый старт следующей сессии
 
@@ -126,51 +149,32 @@ mmcblk1   -> eMMC
 
 ## Следующий учебный шаг
 
-Рекомендуемый следующий этап - остановиться в U-Boot и изучить окружение
-загрузчика без изменения настроек.
+Рекомендуемый следующий этап - разобрать Linux-side часть загрузки: kernel log,
+Device Tree, overlays и состояние встроенной eMMC без прошивки.
 
-Подробный учебный сценарий: `course/04-u-boot-environment.md`.
+Цель этапа:
 
-При загрузке в UART-консоли дождаться строки:
+- понять, как Linux использует Device Tree, полученный от U-Boot;
+- увидеть примененные overlays: ADC, eMMC, HDMI, PRU UIO;
+- сопоставить `/proc/device-tree`, `dmesg`, `/boot/uEnv.txt` и реальные
+  устройства в `/sys`;
+- проверить состояние eMMC только в режиме чтения;
+- подготовить решение о прошивке eMMC как отдельный осознанный этап.
 
-```text
-Press SPACE to abort autoboot
+Первые команды для следующей практики на BeagleBone:
+
+```sh
+cat /proc/cmdline
+tr -d '\0' < /proc/device-tree/model; echo
+find -L /proc/device-tree -maxdepth 2 -type d | head -n 80
+dmesg | grep -Ei 'OF:|fdt|overlay|mmc|adc|pru|hdmi'
+ls -la /boot
+sed -n '1,220p' /boot/uEnv.txt
+lsblk -o NAME,SIZE,FSTYPE,LABEL,PARTUUID,MOUNTPOINTS
 ```
 
-Нажать `Space`.
-
-Первые безопасные команды U-Boot:
-
-```text
-version
-bdinfo
-mmc list
-mmc dev 0
-mmc part
-printenv
-ls mmc 0:1 /
-ls mmc 0:3 /
-ls mmc 0:3 /boot
-boot
-```
-
-Учебная цель:
-
-- увидеть, как U-Boot нумерует microSD и eMMC;
-- найти, на каком разделе лежит `/boot/uEnv.txt`;
-- понять, какие переменные формируют загрузку kernel, Device Tree и initrd;
-- пока ничего не сохранять через `saveenv` и не прошивать eMMC.
-
-После выполнения практики нужно занести фактические результаты в `REPORT.md`:
-
-```text
-version
-mmc list
-mmc part
-проверка mmc 0:1 и mmc 0:3
-пути к uEnv.txt, kernel, DTB и initrd
-сравнение bootargs с /proc/cmdline
-```
+Перед чтением `/boot/uEnv.txt` помнить: пока только смотрим. Изменять файл
+будем только после отдельного решения и бэкапа.
 
 ## Дальний план курса
 
@@ -215,4 +219,5 @@ HART, мультиплексор HART-каналов, гальваническа
 - Подготовка microSD: `course/02-prepare-sd.md`
 - UART и первая загрузка: `course/03-serial-console.md`
 - U-Boot environment: `course/04-u-boot-environment.md`
+- Linux Device Tree и kernel log: `course/05-linux-device-tree.md`
 - План модулей ядра и ADC: `course/20-kernel-modules-roadmap.md`

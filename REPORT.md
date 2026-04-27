@@ -1384,6 +1384,131 @@ Linux kernel
   -> запустил userspace Debian 12
 ```
 
+### Linux-side: /boot/uEnv.txt, overlays и eMMC
+
+Команда:
+
+```sh
+find /proc/device-tree -maxdepth 2 -type d | head -n 80
+```
+
+Результат: команда не вывела каталогов.
+
+Пояснение: это не означает, что Device Tree отсутствует. На этой системе
+`/proc/device-tree` ведет себя как ссылка на дерево в `/sys/firmware`, а
+`find` без `-L` не переходит по symlink. Для следующей проверки нужно
+использовать:
+
+```sh
+find -L /proc/device-tree -maxdepth 2 -type d | head -n 80
+```
+
+или:
+
+```sh
+find /sys/firmware/devicetree/base -maxdepth 2 -type d | head -n 80
+```
+
+Команда:
+
+```sh
+dmesg | grep -Ei 'OF:|fdt|overlay|mmc|adc|pru|hdmi'
+```
+
+Ключевые строки:
+
+```text
+[    0.000000] OF: fdt: Machine model: TI AM335x BeagleBone Black
+[    0.000000] OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+[    0.000000] Kernel command line: console=ttyS0,115200n8 root=/dev/mmcblk0p3 ro rootfstype=ext4 rootwait fsck.repair=yes earlycon coherent_pool=1M net.ifnames=0 lpj=1990656 rng_core.default_quality=100
+[    5.553165] mmc0: SDHCI controller on 48060000.mmc [48060000.mmc] using External DMA
+[    5.592715] mmc1: SDHCI controller on 481d8000.mmc [481d8000.mmc] using External DMA
+[    5.651115] mmc0: new high speed SDXC card at address b371
+[    5.667078] mmc1: new high speed MMC card at address 0001
+```
+
+Вывод:
+
+- Linux получил final Device Tree с моделью `TI AM335x BeagleBone Black`;
+- `48060000.mmc` стал `mmc0`, то есть microSD;
+- `481d8000.mmc` стал `mmc1`, то есть встроенная eMMC;
+- отдельные строки про применение overlays в `dmesg` не обязательны, потому что
+  U-Boot применяет `.dtbo` до старта Linux, а ядро видит уже итоговый FDT.
+
+Команда:
+
+```sh
+ls -la /boot
+```
+
+Результат:
+
+```text
+drwxr-xr-x  4 root   root      4096 Mar 17 21:29 .
+drwxr-xr-x 18 root   root      4096 Mar 17 21:29 ..
+-rw-r--r--  1 root   root       549 Mar 17 21:29 SOC.sh
+-rw-r--r--  1 root   root   5498010 Mar  6 08:24 System.map-6.12.76-bone50
+-rw-r--r--  1 root   root    213488 Mar  6 08:24 config-6.12.76-bone50
+drwxr-xr-x  3 root   root      4096 Mar 17 21:20 dtbs
+drwxr-xr-x  3 andrey andrey     512 Jan  1  1970 firmware
+-rw-r--r--  1 root   root   8722654 Mar 17 21:28 initrd.img-6.12.76-bone50
+-rw-r--r--  1 andrey andrey    2063 Mar 17 21:29 uEnv.txt
+-rwxr-xr-x  1 root   root   8778240 Mar  6 08:24 vmlinuz-6.12.76-bone50
+```
+
+Вывод: Linux видит те же boot-файлы, которые U-Boot читал с `mmc 0:3 /boot`:
+kernel, initrd, `uEnv.txt`, каталог `dtbs` и служебные файлы ядра.
+
+Команда:
+
+```sh
+sed -n '1,220p' /boot/uEnv.txt
+```
+
+Ключевые строки:
+
+```text
+uname_r=6.12.76-bone50
+enable_uboot_overlays=1
+uboot_overlay_pru=AM335X-PRU-UIO-00A0.dtbo
+console=ttyS0,115200n8
+cmdline=fsck.repair=yes earlycon coherent_pool=1M net.ifnames=0 lpj=1990656 rng_core.default_quality=100
+#cmdline=init=/usr/sbin/init-beagle-flasher
+```
+
+Вывод:
+
+- `uname_r=6.12.76-bone50` объясняет, почему U-Boot загрузил
+  `vmlinuz-6.12.76-bone50`, `initrd.img-6.12.76-bone50` и DTB из
+  `/boot/dtbs/6.12.76-bone50`;
+- `enable_uboot_overlays=1` включает механизм U-Boot overlays;
+- `uboot_overlay_pru=AM335X-PRU-UIO-00A0.dtbo` выбирает PRU UIO overlay;
+- `console=` и `cmdline=` входят в итоговую `/proc/cmdline`;
+- строка `init=/usr/sbin/init-beagle-flasher` закомментирована, значит eMMC
+  flasher не включен.
+
+Повторная проверка `lsblk`:
+
+```text
+mmcblk0      58.1G
+├─mmcblk0p1    36M vfat BOOT   37b37d29-01  /boot/firmware
+├─mmcblk0p2   512M swap        37b37d29-02  [SWAP]
+└─mmcblk0p3  57.6G ext4 rootfs 37b37d29-03  /
+mmcblk1       3.6G
+└─mmcblk1p1   3.6G ext4 rootfs cae33b65-01
+mmcblk1boot0    2M
+mmcblk1boot1    2M
+```
+
+Вывод:
+
+- система сейчас загружена с microSD, потому что `/` смонтирован с
+  `mmcblk0p3`;
+- eMMC видна как `mmcblk1` и содержит раздел `mmcblk1p1` с ext4/rootfs, но этот
+  раздел не смонтирован;
+- в этой лабораторной eMMC не изменялась;
+- наличие rootfs на eMMC не означает, что текущая система загружена с eMMC.
+
 ### План второй большой части курса
 
 После обсуждения финального направления для разработки модулей ядра принято
