@@ -15,7 +15,9 @@
 - UART debug console работает через USB-UART адаптер;
 - вход в Debian выполнен пользователем `andrey`;
 - U-Boot environment изучен без изменения настроек;
-- eMMC обнаружена, но не изменялась.
+- eMMC обнаружена, но не изменялась;
+- Ethernet-связь host <-> BeagleBone проверена;
+- SSH с хоста на плату работает через точечный обход VPN.
 
 Используемый образ:
 
@@ -27,6 +29,41 @@ am335x-debian-12.13-base-v6.12-armhf-2026-03-17-4gb.img.xz
 
 ```text
 Linux BeagleBone 6.12.76-bone50 armv7l
+```
+
+Рабочая сеть для host-target workflow:
+
+```text
+host eno0:        10.129.1.110/23
+BeagleBone eth0:  10.129.1.152/23
+VPN interface:    outline-tun1
+VPN table:        7113
+SSH target:       andrey@10.129.1.152
+```
+
+VPN перехватывал маршрут к плате:
+
+```text
+10.129.1.152 via 10.0.85.5 dev outline-tun1 table 7113
+```
+
+Рабочее временное исключение:
+
+```sh
+sudo ip route replace 10.129.1.152/32 dev eno0 src 10.129.1.110 table 7113
+```
+
+Проверка:
+
+```sh
+ip route get 10.129.1.152
+ssh andrey@10.129.1.152
+```
+
+Ожидаемый маршрут:
+
+```text
+10.129.1.152 dev eno0 table 7113 src 10.129.1.110
 ```
 
 ## Важные выводы
@@ -149,32 +186,34 @@ mmcblk1   -> eMMC
 
 ## Следующий учебный шаг
 
-Рекомендуемый следующий этап - разобрать Linux-side часть загрузки: kernel log,
-Device Tree, overlays и состояние встроенной eMMC без прошивки.
+Linux-side часть загрузки, Device Tree и runtime-проверки уже разобраны.
+Рекомендуемый следующий этап - закрыть подготовку host-target workflow и
+перейти к первому kernel module.
 
 Цель этапа:
 
-- понять, как Linux использует Device Tree, полученный от U-Boot;
-- увидеть примененные overlays: ADC, eMMC, HDMI, PRU UIO;
-- сопоставить `/proc/device-tree`, `dmesg`, `/boot/uEnv.txt` и реальные
-  устройства в `/sys`;
-- проверить состояние eMMC только в режиме чтения;
-- подготовить решение о прошивке eMMC как отдельный осознанный этап.
+- проверить SSH/SCP/rsync как канал доставки файлов на плату;
+- создать структуру каталога для модулей ядра;
+- собрать первый `Hello, World` kernel module под `6.12.76-bone50`;
+- загрузить модуль на BeagleBone и проверить `dmesg`;
+- не обновлять kernel-пакеты без отдельного решения.
 
-Первые команды для следующей практики на BeagleBone:
+Первые команды для следующей практики на хосте:
 
 ```sh
-cat /proc/cmdline
-tr -d '\0' < /proc/device-tree/model; echo
-find -L /proc/device-tree -maxdepth 2 -type d | head -n 80
-dmesg | grep -Ei 'OF:|fdt|overlay|mmc|adc|pru|hdmi'
-ls -la /boot
-sed -n '1,220p' /boot/uEnv.txt
-lsblk -o NAME,SIZE,FSTYPE,LABEL,PARTUUID,MOUNTPOINTS
+ip route get 10.129.1.152
+ssh andrey@10.129.1.152 'hostname; uname -r; whoami'
+printf 'bbb host to target transfer test\n' > /tmp/bbb_ssh_transfer_test.txt
+scp /tmp/bbb_ssh_transfer_test.txt andrey@10.129.1.152:/home/andrey/
+ssh andrey@10.129.1.152 \
+  'ls -l /home/andrey/bbb_ssh_transfer_test.txt; cat /home/andrey/bbb_ssh_transfer_test.txt'
 ```
 
-Перед чтением `/boot/uEnv.txt` помнить: пока только смотрим. Изменять файл
-будем только после отдельного решения и бэкапа.
+Если `ip route get` снова показывает `outline-tun1`, восстановить исключение:
+
+```sh
+sudo ip route replace 10.129.1.152/32 dev eno0 src 10.129.1.110 table 7113
+```
 
 ## Дальний план курса
 
@@ -214,10 +253,12 @@ HART, мультиплексор HART-каналов, гальваническа
 
 ## Где смотреть подробности
 
+- HTML-точка входа: `index.html`
 - Общий отчет: `REPORT.md`
 - Boot chain: `course/01-boot-chain.md`
 - Подготовка microSD: `course/02-prepare-sd.md`
 - UART и первая загрузка: `course/03-serial-console.md`
+- Host-target network: `course/06-host-target-network.md`
 - U-Boot environment: `course/04-u-boot-environment.md`
 - Linux Device Tree и kernel log: `course/05-linux-device-tree.md`
 - План модулей ядра и ADC: `course/20-kernel-modules-roadmap.md`

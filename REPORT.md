@@ -1386,6 +1386,1066 @@ Linux kernel
 
 ### Linux-side: /boot/uEnv.txt, overlays и eMMC
 
+Теоретическое уточнение по Device Tree:
+
+```text
+Device Tree = паспорт железа для Linux kernel
+```
+
+Он описывает:
+
+```text
+какие устройства и контроллеры есть на плате
+по каким адресам доступны их регистры
+какие IRQ, clocks, resets, GPIO и pinmux используются
+какие устройства включены или disabled
+какой драйвер может быть сопоставлен через compatible
+```
+
+Ядро выступает диспетчером между Device Tree и драйверами:
+
+```text
+Device Tree
+  -> описывает железо
+
+Kernel device model / OF subsystem
+  -> читает Device Tree
+  -> создает kernel devices
+  -> сопоставляет compatible с таблицами драйверов
+
+Driver
+  -> получает устройство в probe()
+  -> забирает ресурсы
+  -> управляет железом
+```
+
+Формулировка "драйвер понимает `ti,am335-sdhci`" означает:
+
+```text
+Device Tree node:
+  compatible = "ti,am335-sdhci"
+
+Driver of_match_table:
+  .compatible = "ti,am335-sdhci"
+
+Kernel:
+  видит совпадение
+  связывает node с driver
+  вызывает probe()
+```
+
+Важно: `compatible` - это не имя файла и не команда, а строковый ключ для
+matching между описанием устройства и драйвером.
+
+Также уточнено место U-Boot: он не собирает Device Tree с нуля из `.dts/.dtsi`
+во время загрузки. U-Boot загружает уже готовый бинарный `.dtb`, применяет к
+нему выбранные `.dtbo` overlays и передает Linux итоговый flattened Device Tree:
+
+```text
+готовый DTB + выбранные DTBO overlays -> final Device Tree
+```
+
+### Практическое уточнение: host /proc и target /proc
+
+При продолжении практики команды были случайно выполнены на Linux-хосте:
+
+```text
+andrey@andrey-yunin:~/projects/BeagleBone_Black$ readlink -f /proc/device-tree
+/proc/device-tree
+
+andrey@andrey-yunin:~/projects/BeagleBone_Black$ find -L /proc/device-tree -maxdepth 2 -type d | head -n 80
+find: ‘/proc/device-tree’: Нет такого файла или каталога
+```
+
+Учебный вывод: `/proc` и `/sys` относятся к текущему запущенному ядру. На
+Linux-хосте мы видим `/proc` хоста, а не BeagleBone Black. Device Tree платы
+нужно смотреть внутри shell BeagleBone:
+
+```text
+andrey@BeagleBone:~$
+```
+
+Именно там должны выполняться команды:
+
+```sh
+readlink -f /proc/device-tree
+find -L /proc/device-tree -maxdepth 2 -type d | head -n 80
+```
+
+Повторная проверка уже на BeagleBone:
+
+```sh
+readlink -f /proc/device-tree
+```
+
+Результат:
+
+```text
+/sys/firmware/devicetree/base
+```
+
+Вывод: `/proc/device-tree` действительно указывает на итоговый Device Tree,
+доступный также через `/sys/firmware/devicetree/base`.
+
+Команда:
+
+```sh
+find -L /proc/device-tree -maxdepth 2 -type d | head -n 80
+```
+
+Ключевые элементы вывода:
+
+```text
+/proc/device-tree
+/proc/device-tree/opp-table
+/proc/device-tree/__symbols__
+/proc/device-tree/soc
+/proc/device-tree/ocp
+/proc/device-tree/ocp/P8_46_pinmux
+/proc/device-tree/ocp/P9_29_pinmux
+/proc/device-tree/ocp/interrupt-controller@48200000
+/proc/device-tree/leds
+/proc/device-tree/aliases
+/proc/device-tree/chosen
+/proc/device-tree/chosen/overlays
+/proc/device-tree/memory@80000000
+/proc/device-tree/sound
+```
+
+Вывод:
+
+- Device Tree доступен как дерево каталогов;
+- `ocp` содержит On-Chip Peripheral узлы AM335x и pinmux-узлы header-пинов;
+- `P8_*_pinmux` и `P9_*_pinmux` показывают, что pinmux header-пинов тоже
+  представлен в Device Tree;
+- `chosen/overlays` содержит информацию о примененных overlays;
+- `memory@80000000` соответствует RAM, начинающейся с адреса `0x80000000`, что
+  совпадает с `bdinfo` U-Boot.
+
+Команды:
+
+```sh
+tr -d '\0' < /proc/device-tree/model; echo
+tr -d '\0' < /proc/device-tree/compatible; echo
+```
+
+Результат:
+
+```text
+TI AM335x BeagleBone Black
+ti,am335x-bone-blackti,am335x-boneti,am33xx
+```
+
+Вывод:
+
+- `model` - человекочитаемое имя платы;
+- `compatible` содержит цепочку совместимости от конкретной платы к более
+  общему семейству;
+- из-за `NUL`-разделителей строки склеились при простом `tr -d '\0'`; для
+  более читаемого вывода лучше использовать `strings`.
+
+Логическая цепочка compatible:
+
+```text
+ti,am335x-bone-black
+ti,am335x-bone
+ti,am33xx
+```
+
+Это означает: плата совместима сначала с конкретным BeagleBone Black, затем с
+семейством BeagleBone, затем с SoC AM33xx.
+
+Команда:
+
+```sh
+find -L /proc/device-tree -iname '*mmc*'
+```
+
+Ключевые элементы вывода:
+
+```text
+/proc/device-tree/__symbols__/mmc1
+/proc/device-tree/__symbols__/mmc2
+/proc/device-tree/__symbols__/mmc3
+/proc/device-tree/ocp/interconnect@48000000/segment@100000/target-module@d8000/mmc@0
+/proc/device-tree/ocp/interconnect@48000000/segment@0/target-module@60000/mmc@0
+/proc/device-tree/ocp/target-module@47810000/mmc@0
+/proc/device-tree/ocp/interconnect@44c00000/.../pinmux@800/mmc1-pins
+/proc/device-tree/ocp/interconnect@44c00000/.../pinmux@800/emmc-pins
+/proc/device-tree/aliases/mmc0
+/proc/device-tree/aliases/mmc1
+/proc/device-tree/aliases/mmc2
+/proc/device-tree/chosen/overlays/BB-BONE-eMMC1-01-00A0.kernel
+```
+
+Вывод:
+
+- в итоговом Device Tree есть несколько MMC-related узлов и aliases;
+- `mmc1-pins` и `emmc-pins` показывают pinmux для microSD/eMMC;
+- `chosen/overlays/BB-BONE-eMMC1-01-00A0.kernel` подтверждает, что eMMC overlay
+  присутствует в итоговом дереве;
+- путь к MMC-контроллерам в runtime DT глубже, чем простое
+  `/proc/device-tree/ocp/mmc@...`, поэтому для чтения свойств нужно брать
+  фактические найденные пути.
+
+Команда чтения свойств двух MMC child-узлов:
+
+```sh
+for node in \
+  /proc/device-tree/ocp/interconnect@48000000/segment@0/target-module@60000/mmc@0 \
+  /proc/device-tree/ocp/interconnect@48000000/segment@100000/target-module@d8000/mmc@0
+do
+  echo "=== $node ==="
+  echo -n "compatible: "; tr '\0' '\n' < "$node/compatible"
+  echo -n "status: "; tr -d '\0' < "$node/status"; echo
+  echo "reg:"
+  hexdump -C "$node/reg"
+done
+```
+
+Результат:
+
+```text
+=== /proc/device-tree/ocp/interconnect@48000000/segment@0/target-module@60000/mmc@0 ===
+compatible: ti,am335-sdhci
+status: okay
+reg:
+00000000  00 00 00 00 00 00 10 00
+
+=== /proc/device-tree/ocp/interconnect@48000000/segment@100000/target-module@d8000/mmc@0 ===
+compatible: ti,am335-sdhci
+status: okay
+reg:
+00000000  00 00 00 00 00 00 10 00
+```
+
+Вывод:
+
+- оба MMC child-узла совместимы с драйвером `ti,am335-sdhci`;
+- оба узла имеют `status=okay`, значит они включены в итоговом Device Tree;
+- оба узла могут быть сопоставлены с одним и тем же kernel-драйвером;
+- `reg` внутри child-узла `mmc@0` показывает offset `0` и размер `0x1000`;
+- полный адрес контроллера получается из родительского `target-module` и bus
+  mapping, поэтому следующий шаг - посмотреть свойства parent-узлов, чтобы
+  связать DT path с адресами из `dmesg`: `48060000.mmc` и `481d8000.mmc`.
+
+Команда чтения свойств parent `target-module`:
+
+```sh
+for node in \
+  /proc/device-tree/ocp/interconnect@48000000/segment@0/target-module@60000 \
+  /proc/device-tree/ocp/interconnect@48000000/segment@100000/target-module@d8000
+do
+  echo "=== $node ==="
+  echo -n "compatible: "; tr '\0' '\n' < "$node/compatible"
+  echo "reg:"
+  hexdump -C "$node/reg"
+  if [ -f "$node/ranges" ]; then
+    echo "ranges:"
+    hexdump -C "$node/ranges"
+  fi
+done
+```
+
+Результат:
+
+```text
+=== .../segment@0/target-module@60000 ===
+compatible: ti,sysc-omap2
+ti,sysc
+reg:
+00000000  00 06 02 fc 00 00 00 04  00 06 01 10 00 00 00 04
+00000010  00 06 01 14 00 00 00 04
+ranges:
+00000000  00 00 00 00 00 06 00 00  00 00 10 00
+
+=== .../segment@100000/target-module@d8000 ===
+compatible: ti,sysc-omap2
+ti,sysc
+reg:
+00000000  00 0d 82 fc 00 00 00 04  00 0d 81 10 00 00 00 04
+00000010  00 0d 81 14 00 00 00 04
+ranges:
+00000000  00 00 00 00 00 0d 80 00  00 00 10 00
+```
+
+Вывод:
+
+- `target-module` описывает не сам MMC-драйвер, а системный wrapper/sysconfig
+  блок TI (`compatible = ti,sysc-omap2`, `ti,sysc`);
+- child `mmc@0` внутри него уже описывает сам MMC-контроллер
+  (`compatible = ti,am335-sdhci`);
+- `ranges` показывает отображение локального адреса child-узла в адресное
+  пространство родительской шины;
+- для первого контроллера виден offset `0x60000` внутри interconnect
+  `0x48000000`, что дает полный адрес `0x48060000`;
+- для второго контроллера нужно учитывать не только `target-module@d8000`, но и
+  промежуточный `segment@100000`. Поэтому следующий шаг - прочитать свойства
+  `segment@0` и `segment@100000`, чтобы собрать полный путь адресации без
+  предположений.
+
+Команда чтения промежуточных `segment`-узлов:
+
+```sh
+for node in \
+  /proc/device-tree/ocp/interconnect@48000000/segment@0 \
+  /proc/device-tree/ocp/interconnect@48000000/segment@100000
+do
+  echo "=== $node ==="
+  echo "reg:"
+  hexdump -C "$node/reg"
+  if [ -f "$node/ranges" ]; then
+    echo "ranges:"
+    hexdump -C "$node/ranges"
+  fi
+done
+```
+
+Результат: у обоих `segment`-узлов файла `reg` нет:
+
+```text
+hexdump: .../segment@0/reg: No such file or directory
+hexdump: .../segment@100000/reg: No such file or directory
+```
+
+Это не ошибка для нашей задачи. Эти узлы работают как промежуточные bus/segment
+узлы и задают адресную трансляцию через `ranges`.
+
+Для `segment@0` в длинном `ranges` есть нужная запись:
+
+```text
+00 06 00 00  00 06 00 00  00 00 10 00
+```
+
+Расшифровка:
+
+```text
+child address   0x00060000
+parent address  0x00060000
+size            0x00001000
+```
+
+Вместе с родительским `interconnect@48000000` это дает:
+
+```text
+0x48000000 + 0x00060000 = 0x48060000
+```
+
+Это совпадает с kernel log:
+
+```text
+48060000.mmc -> mmc0 -> microSD
+```
+
+Для `segment@100000` в `ranges` есть нужная запись:
+
+```text
+00 0d 80 00  00 1d 80 00  00 00 10 00
+```
+
+Расшифровка:
+
+```text
+child address   0x000d8000
+parent address  0x001d8000
+size            0x00001000
+```
+
+Вместе с родительским `interconnect@48000000` это дает:
+
+```text
+0x48000000 + 0x001d8000 = 0x481d8000
+```
+
+Это совпадает с kernel log:
+
+```text
+481d8000.mmc -> mmc1 -> eMMC
+```
+
+Итоговая адресная цепочка:
+
+```text
+interconnect@48000000
+  -> segment@0
+    -> target-module@60000
+      -> mmc@0
+        -> 0x48060000
+        -> Linux mmc0
+        -> microSD
+
+interconnect@48000000
+  -> segment@100000
+    -> target-module@d8000
+      -> mmc@0
+        -> 0x481d8000
+        -> Linux mmc1
+        -> eMMC
+```
+
+Учебный вывод: полный physical address устройства в Device Tree может
+получаться не из одного `reg`, а через цепочку родительских `ranges`.
+
+Команда чтения MMC aliases:
+
+```sh
+for alias in mmc0 mmc1 mmc2; do
+  echo -n "$alias -> "
+  tr -d '\0' < /proc/device-tree/aliases/$alias
+  echo
+done
+```
+
+Результат:
+
+```text
+mmc0 -> /ocp/interconnect@48000000/segment@0/target-module@60000/mmc@0
+mmc1 -> /ocp/interconnect@48000000/segment@100000/target-module@d8000/mmc@0
+mmc2 -> /ocp/target-module@47810000/mmc@0
+```
+
+Вывод:
+
+- aliases дают короткие стабильные имена для длинных Device Tree paths;
+- `mmc0` указывает на контроллер microSD;
+- `mmc1` указывает на контроллер eMMC;
+- `mmc2` описан в Device Tree как дополнительный MMC-контроллер/интерфейс, но
+  в текущей системе основная практическая связка уже подтверждена для
+  `mmc0 -> mmcblk0` и `mmc1 -> mmcblk1`.
+
+Команда просмотра overlays в итоговом Device Tree:
+
+```sh
+find -L /proc/device-tree/chosen/overlays -maxdepth 1 -type f -print
+```
+
+Результат:
+
+```text
+/proc/device-tree/chosen/overlays/BB-HDMI-TDA998x-00A0.kernel
+/proc/device-tree/chosen/overlays/AM335X-PRU-UIO-00A0.kernel
+/proc/device-tree/chosen/overlays/BB-BONE-eMMC1-01-00A0.kernel
+/proc/device-tree/chosen/overlays/BB-ADC-00A0.kernel
+/proc/device-tree/chosen/overlays/name
+```
+
+Вывод:
+
+- в итоговом Device Tree есть отметки о примененных overlays;
+- список совпадает с тем, что U-Boot загружал в boot log;
+- `BB-ADC-00A0` включает ADC overlay;
+- `BB-BONE-eMMC1-01-00A0` включает eMMC overlay;
+- `BB-HDMI-TDA998x-00A0` включает HDMI overlay;
+- `AM335X-PRU-UIO-00A0` включает PRU UIO overlay.
+
+Команда чтения содержимого marker-файлов overlays:
+
+```sh
+for f in /proc/device-tree/chosen/overlays/*.kernel; do
+  echo "=== $f ==="
+  hexdump -C "$f"
+done
+```
+
+Результат для каждого overlay-файла содержит строку:
+
+```text
+Fri Mar  6 05:23:58 2026
+```
+
+Вывод:
+
+- файлы в `/proc/device-tree/chosen/overlays/*.kernel` не являются исходными
+  `.dtbo`;
+- это небольшие marker-файлы с информацией о примененном overlay;
+- сами изменения overlay уже внесены в итоговый Device Tree;
+- чтобы увидеть эффект overlay, нужно искать измененные/добавленные узлы и
+  свойства в дереве, а не ожидать увидеть полный `.dtbo` внутри
+  `/chosen/overlays`.
+
+Команда поиска ADC/TSC_ADC узлов:
+
+```sh
+find -L /proc/device-tree -iname '*adc*' -o -iname '*tscadc*'
+```
+
+Результат:
+
+```text
+/proc/device-tree/__symbols__/bone_adc
+/proc/device-tree/__symbols__/adc_tsc_fck
+/proc/device-tree/__symbols__/am335x_adc
+/proc/device-tree/__symbols__/tscadc
+/proc/device-tree/ocp/interconnect@44c00000/segment@200000/target-module@d000/tscadc@0
+/proc/device-tree/ocp/interconnect@44c00000/segment@200000/target-module@d000/tscadc@0/adc
+/proc/device-tree/ocp/interconnect@44c00000/segment@200000/target-module@d000/tscadc@0/adc/ti,adc-channels
+/proc/device-tree/ocp/interconnect@44c00000/segment@200000/target-module@10000/scm@0/scm_conf@0/clocks/clock-adc-tsc-fck
+/proc/device-tree/chosen/overlays/BB-ADC-00A0.kernel
+```
+
+Вывод:
+
+- в итоговом Device Tree присутствует TSC_ADC блок AM335x;
+- внутри него есть child-узел `adc`;
+- свойство `ti,adc-channels` должно описывать включенные ADC-каналы;
+- marker `BB-ADC-00A0.kernel` подтверждает, что ADC overlay применен;
+- это будет точкой входа для следующей большой темы: встроенный ADC через
+  существующий Linux IIO-драйвер.
+
+Команды чтения свойств TSC_ADC и ADC child:
+
+```sh
+tsc=/proc/device-tree/ocp/interconnect@44c00000/segment@200000/target-module@d000/tscadc@0
+adc=$tsc/adc
+
+echo -n "compatible: "; tr '\0' '\n' < "$tsc/compatible"
+echo -n "status: "; tr -d '\0' < "$tsc/status"; echo
+hexdump -C "$tsc/reg"
+
+echo -n "compatible: "; tr '\0' '\n' < "$adc/compatible"
+hexdump -C "$adc/ti,adc-channels"
+```
+
+Результат:
+
+```text
+=== TSCADC ===
+compatible: ti,am3359-tscadc
+status: okay
+reg:
+00000000  00 00 00 00 00 00 10 00
+
+=== ADC child ===
+compatible: ti,am3359-adc
+ti,adc-channels:
+00000000  00 00 00 00 00 00 00 01  00 00 00 02 00 00 00 03
+00000010  00 00 00 04 00 00 00 05  00 00 00 06 00 00 00 07
+```
+
+Вывод:
+
+- parent TSC_ADC node совместим с `ti,am3359-tscadc`;
+- parent node имеет `status=okay`, значит блок включен;
+- child ADC node совместим с `ti,am3359-adc`;
+- свойство `ti,adc-channels` содержит big-endian 32-bit значения каналов
+  `0, 1, 2, 3, 4, 5, 6, 7`;
+- ADC overlay включил все восемь ADC-каналов;
+- следующий практический мост - найти соответствующее IIO-устройство в Linux и
+  сопоставить Device Tree channels с файлами `in_voltage*_raw`.
+
+Команда просмотра IIO-устройств:
+
+```sh
+ls -la /sys/bus/iio/devices
+```
+
+Результат:
+
+```text
+iio:device0 -> ../../../devices/platform/ocp/44c00000.interconnect/44c00000.interconnect:segment@200000/44e0d000.target-module/44e0d000.tscadc/TI-am335x-adc.0.auto/iio:device0
+```
+
+Команда:
+
+```sh
+for dev in /sys/bus/iio/devices/iio:device*; do
+  echo "=== $dev ==="
+  cat "$dev/name" 2>/dev/null
+  ls "$dev"/in_voltage*_raw 2>/dev/null
+done
+```
+
+Результат:
+
+```text
+=== /sys/bus/iio/devices/iio:device0 ===
+TI-am335x-adc.0.auto
+/sys/bus/iio/devices/iio:device0/in_voltage0_raw
+/sys/bus/iio/devices/iio:device0/in_voltage1_raw
+/sys/bus/iio/devices/iio:device0/in_voltage2_raw
+/sys/bus/iio/devices/iio:device0/in_voltage3_raw
+/sys/bus/iio/devices/iio:device0/in_voltage4_raw
+/sys/bus/iio/devices/iio:device0/in_voltage5_raw
+/sys/bus/iio/devices/iio:device0/in_voltage6_raw
+/sys/bus/iio/devices/iio:device0/in_voltage7_raw
+```
+
+Вывод:
+
+- Linux создал IIO device для встроенного ADC AM335x;
+- имя устройства `TI-am335x-adc.0.auto`;
+- IIO ABI экспортирует восемь raw-каналов `in_voltage0_raw` ...
+  `in_voltage7_raw`;
+- это соответствует Device Tree свойству `ti,adc-channels = <0 1 2 3 4 5 6 7>`;
+- связка `Device Tree -> driver probe -> IIO device -> sysfs raw channels`
+  подтверждена.
+
+Команда первого чтения ADC raw-кодов:
+
+```sh
+for f in /sys/bus/iio/devices/iio:device0/in_voltage*_raw; do
+  echo -n "$(basename "$f"): "
+  cat "$f"
+done
+```
+
+Результат:
+
+```text
+in_voltage0_raw: 2421
+in_voltage1_raw: 1721
+in_voltage2_raw: 2389
+in_voltage3_raw: 244
+in_voltage4_raw: 299
+in_voltage5_raw: 455
+in_voltage6_raw: 444
+in_voltage7_raw: 3850
+```
+
+Что делает команда:
+
+- проходит по всем файлам `in_voltage*_raw`;
+- печатает имя канала через `basename`;
+- читает raw-код ADC из каждого файла;
+- обращается уже не к Device Tree, а к Linux IIO ABI, который создал драйвер.
+
+Интерпретация:
+
+- `raw` - это сырой цифровой код ADC, а не вольты;
+- ADC AM335x 12-битный, нормальный диапазон raw-кода: `0..4095`;
+- диапазон аналогового входа BeagleBone Black: `0..1.8 V`;
+- примерная оценка: `voltage ~= raw * 1.8 / 4096`.
+
+Примерная оценка полученных значений:
+
+```text
+in_voltage0_raw: 2421 -> около 1.064 V
+in_voltage1_raw: 1721 -> около 0.756 V
+in_voltage2_raw: 2389 -> около 1.050 V
+in_voltage3_raw: 244  -> около 0.107 V
+in_voltage4_raw: 299  -> около 0.131 V
+in_voltage5_raw: 455  -> около 0.200 V
+in_voltage6_raw: 444  -> около 0.195 V
+in_voltage7_raw: 3850 -> около 1.692 V
+```
+
+Эти числа подтверждают, что чтение ADC через драйвер и IIO работает. Но если
+аналоговые входы физически не подключены к стабильному источнику сигнала, это
+не измерение датчика. Неподключенный вход находится в floating-состоянии, на
+него влияют наводки, утечки, входная емкость и предыдущие переключения
+мультиплексора ADC.
+
+Для точного пересчета raw-кода нужно проверить scale, который экспортирует
+драйвер:
+
+```sh
+cat /sys/bus/iio/devices/iio:device0/in_voltage_scale
+```
+
+Модель пересчета:
+
+```text
+voltage = raw * scale
+```
+
+Для `in_voltage` в IIO это обычно дает значение в millivolts.
+
+Учебный вывод:
+
+```text
+Device Tree включил ADC channels.
+Драйвер создал IIO device.
+Userspace смог прочитать raw-коды.
+Полезным измерением это станет после подключения корректной аналоговой схемы.
+```
+
+Концептуальное уточнение по userspace-приложению:
+
+```text
+Device Tree
+  -> описывает железо и конфигурацию платы
+
+Kernel driver
+  -> инициализирует контроллер
+  -> включает ресурсы: clocks, IRQ, MMIO, pinctrl
+  -> регистрирует kernel ABI
+
+Userspace application
+  -> использует готовый ABI
+  -> читает данные
+  -> выполняет прикладную обработку
+```
+
+В случае встроенного ADC BeagleBone Black приложение пользователя не должно
+настраивать MMIO-регистры ADC напрямую. Если kernel driver успешно выполнил
+`probe()` и создал файлы:
+
+```text
+/sys/bus/iio/devices/iio:device0/in_voltage0_raw
+...
+/sys/bus/iio/devices/iio:device0/in_voltage7_raw
+```
+
+то минимальному userspace-приложению достаточно читать эти файлы и пересчитывать
+raw-код в напряжение.
+
+Приложение не делает:
+
+```text
+probe()
+настройку MMIO-регистров ADC
+включение clocks
+регистрацию IIO channels
+```
+
+Это зона ответственности драйвера.
+
+Userspace может выполнять только ту прикладную настройку, которую драйвер
+экспортирует через ABI, например:
+
+```text
+in_voltage_scale
+sampling_frequency
+buffer/trigger
+channel enable
+GPIO управления внешней схемой
+```
+
+Итоговая формулировка:
+
+```text
+Если драйвер поднял ADC и экспортировал IIO-файлы,
+userspace-приложение читает данные через IIO.
+Отдельная инициализация ADC из userspace не нужна.
+```
+
+Практический блок проверки пути данных для userspace-приложения:
+
+Задача: приложение пользователя должно получить данные ADC из userspace. Для
+этого нужно пройти путь от IIO device до конкретного файла
+`in_voltageN_raw`, который приложение сможет открыть и прочитать.
+
+Шаг 1. Убедиться, что IIO bus есть в системе:
+
+```sh
+ls -la /sys/bus/iio/devices
+```
+
+Зачем:
+
+- проверить, что подсистема IIO доступна;
+- увидеть все IIO-устройства, созданные драйверами;
+- найти candidates вида `iio:device0`, `iio:device1` и т.д.
+
+В нашей системе найден:
+
+```text
+/sys/bus/iio/devices/iio:device0
+```
+
+Шаг 2. Понять, какое `iio:deviceX` является ADC:
+
+```sh
+for dev in /sys/bus/iio/devices/iio:device*; do
+  echo "=== $dev ==="
+  cat "$dev/name" 2>/dev/null
+done
+```
+
+Зачем:
+
+- `iio:device0` - runtime index, а не постоянное имя конкретного железа;
+- если в системе появятся другие IIO-устройства, номер может измениться;
+- файл `name` связывает `iio:deviceX` с конкретным драйвером.
+
+Ожидаемое имя для встроенного ADC:
+
+```text
+TI-am335x-adc.0.auto
+```
+
+Шаг 3. Зафиксировать путь найденного ADC:
+
+```sh
+adc_dev=/sys/bus/iio/devices/iio:device0
+cat "$adc_dev/name"
+```
+
+Зачем:
+
+- получить короткую переменную для дальнейших команд;
+- убедиться, что выбран именно ADC.
+
+Для будущего приложения лучше искать устройство по `name`, а не жестко
+зашивать номер `iio:device0`.
+
+Шаг 4. Посмотреть физический путь устройства в sysfs:
+
+```sh
+readlink -f "$adc_dev"
+```
+
+Зачем:
+
+- увидеть, к какому platform device привязан IIO device;
+- связать userspace path с Device Tree и kernel driver;
+- подтвердить, что это ABI поверх реального драйвера.
+
+Ожидаемая логика пути:
+
+```text
+/sys/devices/platform/.../44e0d000.tscadc/.../iio:device0
+```
+
+Шаг 5. Увидеть файлы, которые может читать приложение:
+
+```sh
+ls "$adc_dev"/in_voltage*_raw
+```
+
+Зачем:
+
+- получить список каналов, экспортированных драйвером;
+- увидеть конкретные файлы для чтения из userspace.
+
+Для нашей системы:
+
+```text
+/sys/bus/iio/devices/iio:device0/in_voltage0_raw
+...
+/sys/bus/iio/devices/iio:device0/in_voltage7_raw
+```
+
+Это основные пути чтения данных.
+
+Шаг 6. Проверить scale для пересчета raw-кода:
+
+```sh
+cat "$adc_dev/in_voltage_scale"
+```
+
+Зачем:
+
+- получить коэффициент пересчета raw-кода;
+- не зашивать приблизительное `1.8 / 4096`, если драйвер экспортирует scale;
+- использовать стандартную IIO-модель:
+
+```text
+voltage = raw * scale
+```
+
+Результат практики:
+
+```text
+0.439453125
+```
+
+Для `in_voltage` это значение обычно интерпретируется как millivolts per ADC
+count. Поэтому для userspace-приложения:
+
+```text
+voltage_mV = raw * 0.439453125
+voltage_V  = voltage_mV / 1000.0
+```
+
+Проверка полного диапазона:
+
+```text
+4096 * 0.439453125 = 1800 mV = 1.8 V
+```
+
+Это совпадает с допустимым диапазоном встроенного ADC BeagleBone Black
+`0..1.8 V`.
+
+Пример для ранее прочитанного значения `in_voltage0_raw = 2421`:
+
+```text
+2421 * 0.439453125 = 1063.92 mV = 1.064 V
+```
+
+Шаг 7. Прочитать один канал так, как это сделает приложение:
+
+```sh
+cat "$adc_dev/in_voltage0_raw"
+```
+
+Зачем:
+
+- проверить минимальный путь данных;
+- убедиться, что файл читается без ошибок;
+- увидеть путь, который приложение будет открывать для канала 0.
+
+Модель для приложения:
+
+```text
+open("/sys/bus/iio/devices/iio:device0/in_voltage0_raw")
+read()
+parse integer
+```
+
+Шаг 8. Прочитать все каналы:
+
+```sh
+for f in "$adc_dev"/in_voltage*_raw; do
+  echo -n "$(basename "$f"): "
+  cat "$f"
+done
+```
+
+Зачем:
+
+- проверить, что все каналы, созданные драйвером, читаются;
+- увидеть текущие raw-коды;
+- подготовиться к проверке будущей схемы подключения датчика.
+
+Итоговый путь данных:
+
+```text
+AM335x ADC hardware
+  -> kernel driver
+  -> IIO sysfs ABI
+  -> /sys/bus/iio/devices/iio:device0/in_voltageN_raw
+  -> userspace application
+```
+
+Важное ограничение для следующей практики: analog inputs BeagleBone Black не
+являются 3.3 V tolerant. Для встроенного ADC работать только в диапазоне
+`0..1.8 V`.
+
+### Концептуальное уточнение: Device Tree и активность устройств
+
+U-Boot не устанавливает и не активирует все устройства из образа. В этой части
+загрузки U-Boot:
+
+```text
+загружает kernel
+загружает базовый Device Tree
+применяет overlays
+передает bootargs
+стартует kernel
+```
+
+Дальше Linux kernel читает итоговый Device Tree и пытается создать устройства,
+сопоставить их с драйверами и вызвать `probe()`.
+
+Возможные состояния устройства:
+
+```text
+status = "disabled"
+  -> устройство описано, но Linux его не поднимает
+
+status = "okay", но драйвера нет
+  -> устройство есть в DT, но работать не будет
+
+status = "okay", драйвер есть, probe() успешен
+  -> устройство инициализировано и активно
+
+status = "okay", драйвер есть, probe() failed
+  -> устройство найдено, но не поднялось из-за ошибки ресурсов
+```
+
+Правильная проверочная цепочка:
+
+```text
+Device Tree node
+  -> status
+  -> compatible
+  -> driver match
+  -> probe()
+  -> runtime evidence in dmesg / sysfs / devfs
+```
+
+В этой лабораторной активность подтверждена для MMC:
+
+```text
+DT node есть
+compatible = ti,am335-sdhci
+status = okay
+dmesg показывает SDHCI controller и mmc0/mmc1
+Linux видит mmcblk0/mmcblk1
+```
+
+И для ADC:
+
+```text
+DT node есть
+compatible = ti,am3359-adc
+BB-ADC overlay применен
+IIO device появился
+in_voltage0_raw ... in_voltage7_raw есть
+```
+
+Итоговая формулировка:
+
+```text
+U-Boot подготавливает описание железа.
+Linux по этому описанию создает устройства и запускает драйверы.
+Активность устройства подтверждается только runtime-признаками Linux.
+```
+
+### Концептуальное уточнение: Device Tree properties и поведение драйвера
+
+Device Tree property влияет на поведение устройства только тогда, когда драйвер
+это свойство реально поддерживает и читает.
+
+Правило:
+
+```text
+DT property существует
++ driver читает эту property
+= поведение меняется
+
+DT property существует
++ driver игнорирует эту property
+= поведение не меняется
+```
+
+Пример со встроенным ADC:
+
+```text
+ti,adc-channels = <0 1 2 3 4 5 6 7>;
+```
+
+Если драйвер `ti,am3359-adc` поддерживает это свойство, то в `probe()` он
+читает список каналов и регистрирует соответствующие IIO channels.
+
+Для конфигурации только одного канала правильная модель такая:
+
+```text
+Device Tree overlay:
+  ti,adc-channels = <0>;
+
+driver probe():
+  читает property "ti,adc-channels"
+  создает список каналов
+  регистрирует только channel 0
+
+userspace:
+  видит in_voltage0_raw
+```
+
+Если драйвер не читает `ti,adc-channels` и всегда жестко создает все 8 каналов,
+то изменение Device Tree не изменит поведение. Поэтому перед изменением DT
+нужно смотреть binding/documentation или код драйвера.
+
+Важный вывод из обсуждения: если в Device Tree убрать каналы, но драйвер не
+использует это свойство, драйвер продолжит работать по своей внутренней логике.
+Device Tree сам по себе не запрещает драйверу обращаться к каналам. Он только
+передает конфигурационные данные, которые драйвер может прочитать и применить.
+
+Инженерный вывод:
+
+```text
+Device Tree задает конфигурацию платы.
+Драйвер определяет, какие DT properties он учитывает.
+Поведение устройства меняется только в пределах того, что поддерживает драйвер.
+```
+
+Переписывать драйвер имеет смысл, когда штатный драйвер не поддерживает нужный
+режим, содержит ошибку или когда нужно добавить поддержку нового внешнего
+устройства. Если нужно изменить только конфигурацию платы, сначала проверяют
+вариант через Device Tree overlay.
+
 Команда:
 
 ```sh
@@ -1551,3 +2611,391 @@ ADP2441   24 V industrial DC/DC
 ```text
 course/20-kernel-modules-roadmap.md
 ```
+
+### Host-target network, SSH и обход VPN
+
+Перед переходом к разработке модулей ядра подготовлен сетевой канал между
+Linux-хостом и BeagleBone Black. Цель - писать код в VS Code на хосте,
+передавать файлы на плату по SSH/SCP/rsync и проверять результат на target.
+
+Физическая схема:
+
+```text
+Linux host eno0
+  -> unmanaged switch
+  -> BeagleBone Black eth0
+```
+
+Проверка адресов на BeagleBone:
+
+```sh
+ip -br addr
+```
+
+Ключевой результат:
+
+```text
+eth0  UP  10.129.1.152/23 metric 1024
+usb0  UP  192.168.7.2/24
+usb1  UP  192.168.6.2/24
+```
+
+Проверка маршрутов на BeagleBone:
+
+```sh
+ip route
+```
+
+Ключевой результат:
+
+```text
+default via 10.129.0.1 dev eth0 proto dhcp src 10.129.1.152 metric 1024
+10.129.0.0/23 dev eth0 proto kernel scope link src 10.129.1.152 metric 1024
+192.168.6.0/24 dev usb1 proto kernel scope link src 192.168.6.2
+192.168.7.0/24 dev usb0 proto kernel scope link src 192.168.7.2
+```
+
+Вывод:
+
+- плата получила Ethernet-адрес `10.129.1.152/23`;
+- gateway платы: `10.129.0.1`;
+- USB gadget network тоже поднят, но основной рабочий канал выбран через
+  `eth0`.
+
+Проверка адресов на хосте:
+
+```sh
+ip -br addr
+```
+
+Ключевой результат:
+
+```text
+eno0             UP       10.129.1.110/23
+outline-tun1     UNKNOWN  10.0.85.5/32
+enx30e283532bca  UNKNOWN  192.168.7.1/24
+enx30e283532bcc  UP       192.168.6.1/24
+```
+
+Вывод:
+
+- Ethernet-интерфейс хоста: `eno0`;
+- адрес хоста в той же сети: `10.129.1.110/23`;
+- VPN-интерфейс: `outline-tun1`;
+- USB gadget interfaces на хосте тоже видны как `192.168.7.1/24` и
+  `192.168.6.1/24`.
+
+Проверка `ping` с хоста:
+
+```sh
+ping -c 3 10.129.1.152
+```
+
+Результат:
+
+```text
+3 packets transmitted, 3 received, 0% packet loss
+rtt min/avg/max/mdev = 0.308/0.344/0.384/0.031 ms
+```
+
+Но `ping` оказался недостаточным доказательством правильного пути, потому что
+на хосте работал VPN с policy routing.
+
+Проверка реального маршрута:
+
+```sh
+ip route get 10.129.1.152
+```
+
+Проблемный результат:
+
+```text
+10.129.1.152 via 10.0.85.5 dev outline-tun1 table 7113 src 10.0.85.5 uid 1000
+    cache
+```
+
+Вывод:
+
+- хост отправлял трафик к плате через VPN `outline-tun1`;
+- VPN использовал routing table `7113`;
+- поэтому SSH-подключение к `10.129.1.152` закрывалось до нормального
+  handshake.
+
+Симптом SSH на хосте:
+
+```sh
+ssh -vvv andrey@10.129.1.152
+```
+
+Ключевой фрагмент:
+
+```text
+Connection established.
+Local version string SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.4
+kex_exchange_identification: Connection closed by remote host
+Connection closed by 10.129.1.152 port 22
+```
+
+Проверка SSH-сервиса на BeagleBone:
+
+```sh
+sudo systemctl status ssh --no-pager
+sudo ss -ltnp | grep ':22'
+```
+
+Ключевые результаты:
+
+```text
+Active: active (running)
+Server listening on 0.0.0.0 port 22.
+Server listening on :: port 22.
+LISTEN ... 0.0.0.0:22 ... users:(("sshd",pid=1891,fd=3))
+LISTEN ... [::]:22       ... users:(("sshd",pid=1891,fd=4))
+```
+
+Вывод: `sshd` на плате работал корректно; проблема была в маршрутизации на
+хосте.
+
+Дополнительная диагностика:
+
+```sh
+sudo /usr/sbin/sshd -ddd -p 2222 -D -e
+```
+
+И с хоста:
+
+```sh
+ssh -vvv -p 2222 andrey@10.129.1.152
+```
+
+Debug `sshd` на плате не показывал строку `Connection from ...`, пока маршрут
+шел через VPN. Это подтвердило, что попытка не доходила до debug-сервера на
+BeagleBone.
+
+Первая попытка исправления:
+
+```sh
+sudo ip route add 10.129.1.152/32 dev eno0
+```
+
+Она добавила route в `main` table, но не изменила результат `ip route get`,
+потому что VPN использовал policy table `7113`.
+
+Рабочее исправление:
+
+```sh
+sudo ip route add 10.129.1.152/32 dev eno0 src 10.129.1.110 table 7113
+```
+
+Проверка:
+
+```sh
+ip route get 10.129.1.152
+```
+
+Рабочий результат:
+
+```text
+10.129.1.152 dev eno0 table 7113 src 10.129.1.110 uid 1000
+    cache
+```
+
+Вывод:
+
+- только трафик к `10.129.1.152/32` идет напрямую через `eno0`;
+- VPN остается включенным для остального трафика;
+- это исключение работает для SSH, SCP, rsync, ping и других соединений к
+  плате.
+
+Проверка SSH после исправления:
+
+```sh
+ssh andrey@10.129.1.152
+```
+
+При первом подключении подтвержден host key:
+
+```text
+ED25519 key fingerprint is SHA256:KscTrYzK7rNQxXp3yDxh1EfEuRmWj4hY1qqoC78/hoU.
+```
+
+Этот fingerprint совпал с ED25519 host key, который был виден в debug `sshd`:
+
+```text
+ssh-ed25519 SHA256:KscTrYzK7rNQxXp3yDxh1EfEuRmWj4hY1qqoC78/hoU
+```
+
+После подтверждения выполнен успешный вход:
+
+```text
+Debian GNU/Linux 12
+BeagleBoard.org Debian Bookworm Base Image 2026-03-17
+andrey@BeagleBone:~$
+```
+
+Итоговая рабочая схема:
+
+```text
+host eno0:         10.129.1.110/23
+BeagleBone eth0:   10.129.1.152/23
+VPN interface:     outline-tun1
+VPN routing table: 7113
+VPN bypass:        10.129.1.152/32 -> eno0 in table 7113
+SSH:               works
+```
+
+Команда восстановления после перезагрузки хоста, перезапуска сети или VPN:
+
+```sh
+sudo ip route replace 10.129.1.152/32 dev eno0 src 10.129.1.110 table 7113
+```
+
+Главная проверка:
+
+```sh
+ip route get 10.129.1.152
+ssh andrey@10.129.1.152
+```
+
+Ожидаемый маршрут:
+
+```text
+10.129.1.152 dev eno0 table 7113 src 10.129.1.110
+```
+
+Откат временной настройки:
+
+```sh
+sudo ip route del 10.129.1.152/32 table 7113
+```
+
+Если остался route в `main` table:
+
+```sh
+sudo ip route del 10.129.1.152/32 dev eno0
+```
+
+Тесты для будущей передачи файлов:
+
+```sh
+ssh andrey@10.129.1.152 'hostname; uname -r; whoami'
+scp README.md andrey@10.129.1.152:/home/andrey/
+rsync -av modules/ andrey@10.129.1.152:/home/andrey/bbb-course/modules/
+```
+
+Финальная проверка host-to-target передачи перед коммитом:
+
+```sh
+ip route get 10.129.1.152
+```
+
+Результат:
+
+```text
+10.129.1.152 dev eno0 table 7113 src 10.129.1.110 uid 1000
+    cache
+```
+
+Команда:
+
+```sh
+ssh andrey@10.129.1.152 'hostname; uname -r; whoami'
+```
+
+Результат:
+
+```text
+BeagleBone
+6.12.76-bone50
+andrey
+```
+
+Создание тестового файла на хосте:
+
+```sh
+printf 'bbb host to target transfer test\n' > /tmp/bbb_ssh_transfer_test.txt
+```
+
+Передача на плату:
+
+```sh
+scp /tmp/bbb_ssh_transfer_test.txt andrey@10.129.1.152:/home/andrey/
+```
+
+Результат:
+
+```text
+bbb_ssh_transfer_test.txt 100% 33
+```
+
+Проверка содержимого на плате через SSH:
+
+```sh
+ssh andrey@10.129.1.152 \
+  'ls -l /home/andrey/bbb_ssh_transfer_test.txt; cat /home/andrey/bbb_ssh_transfer_test.txt'
+```
+
+Результат:
+
+```text
+-rw-r--r-- 1 andrey andrey 33 Apr 27 16:38 /home/andrey/bbb_ssh_transfer_test.txt
+bbb host to target transfer test
+```
+
+Вывод:
+
+```text
+host -> eno0 -> switch -> BeagleBone eth0 -> SSH/SCP -> /home/andrey
+```
+
+проверен end-to-end. Канал готов для передачи исходников и модулей ядра.
+
+Добавлен отдельный учебный раздел:
+
+```text
+course/06-host-target-network.md
+```
+
+### Единая HTML-точка входа
+
+Для удобной навигации по учебной базе добавлен статический файл:
+
+```text
+index.html
+```
+
+Назначение:
+
+- дать одну точку входа в документацию;
+- не искать информацию вручную по всем `.md` файлам;
+- разделить учебную теорию, карту документов и базу команд;
+- быстро находить команды по словам `ssh`, `vpn`, `device tree`, `adc`, `iio`,
+  `u-boot`, `kernel`;
+- открыть документацию в браузере без локального сервера.
+
+Структура `index.html`:
+
+```text
+Текущее состояние
+Документы курса
+Учебная теория
+База команд
+Рабочий цикл разработки
+Следующие шаги
+```
+
+В базу команд вынесены проверенные команды:
+
+```text
+host-target network / SSH / SCP
+Linux runtime checks
+Device Tree inspection
+ADC через IIO
+U-Boot inspection
+```
+
+Также добавлены:
+
+- поиск по странице;
+- кнопки копирования команд;
+- ссылки на все основные документы курса.

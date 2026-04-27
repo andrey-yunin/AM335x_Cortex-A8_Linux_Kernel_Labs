@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BeagleBone Black Course Index</title>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --text: #1d2733;
+      --muted: #657386;
+      --line: #d9e0e8;
+      --accent: #146c94;
+      --accent-2: #2e7d32;
+      --code-bg: #101820;
+      --code-text: #e9f1f7;
+      --warn: #8a5a00;
+      --shadow: 0 8px 24px rgba(31, 41, 55, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 24px 20px;
+      background: #17212b;
+      color: #eef5f9;
+      overflow: auto;
+    }
+
+    aside h1 {
+      margin: 0 0 10px;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    aside p {
+      margin: 0 0 20px;
+      color: #b8c6d4;
+      font-size: 14px;
+    }
+
+    nav a {
+      display: block;
+      padding: 9px 10px;
+      color: #eef5f9;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    nav a:hover {
+      background: rgba(255, 255, 255, 0.08);
+      text-decoration: none;
+    }
+
+    main {
+      padding: 34px;
+      max-width: 1180px;
+      width: 100%;
+    }
+
+    .hero {
+      margin-bottom: 22px;
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero h2 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.2;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 860px;
+      color: var(--muted);
+    }
+
+    .search {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+    }
+
+    input[type="search"] {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font: inherit;
+    }
+
+    .status-grid,
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card,
+    .status {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .card h3,
+    .status h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+
+    .card p,
+    .status p {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eaf2f7;
+      color: #22536b;
+      font-size: 12px;
+    }
+
+    section {
+      margin-top: 26px;
+    }
+
+    section > h2 {
+      margin: 0 0 12px;
+      font-size: 24px;
+    }
+
+    details {
+      margin: 10px 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    summary {
+      cursor: pointer;
+      padding: 14px 16px;
+      font-weight: 650;
+    }
+
+    details[open] summary {
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfd;
+    }
+
+    .details-body {
+      padding: 14px 16px 16px;
+    }
+
+    .doc-list,
+    .concept-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .doc-list li,
+    .concept-list li {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfcfd;
+    }
+
+    .doc-list strong,
+    .concept-list strong {
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .doc-list span,
+    .concept-list span {
+      display: block;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .cmd {
+      margin: 12px 0;
+      border: 1px solid #253444;
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--code-bg);
+    }
+
+    .cmd-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 8px 10px;
+      border-bottom: 1px solid #253444;
+      color: #b8c6d4;
+      font-size: 13px;
+    }
+
+    .copy {
+      appearance: none;
+      border: 1px solid #496275;
+      border-radius: 5px;
+      background: #1d2a36;
+      color: #e9f1f7;
+      cursor: pointer;
+      padding: 5px 8px;
+      font: inherit;
+      font-size: 12px;
+    }
+
+    pre {
+      margin: 0;
+      padding: 12px;
+      overflow: auto;
+      color: var(--code-text);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+
+    .note {
+      margin: 12px 0;
+      padding: 12px;
+      border-left: 4px solid var(--warn);
+      background: #fff8e8;
+      border-radius: 4px;
+      color: #463300;
+    }
+
+    .ok {
+      color: var(--accent-2);
+      font-weight: 650;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      aside {
+        position: static;
+        height: auto;
+      }
+
+      main {
+        padding: 18px;
+      }
+
+      .status-grid,
+      .card-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <h1>BBB Course Index</h1>
+      <p>Единая точка входа в учебную базу BeagleBone Black.</p>
+      <nav>
+        <a href="#status">Текущее состояние</a>
+        <a href="#docs">Документы курса</a>
+        <a href="#theory">Теория</a>
+        <a href="#commands">База команд</a>
+        <a href="#workflow">Рабочий цикл</a>
+        <a href="#next">Следующие шаги</a>
+      </nav>
+    </aside>
+
+    <main>
+      <div class="hero">
+        <h2>BeagleBone Black: Linux, Device Tree и драйверы</h2>
+        <p>
+          Эта страница собирает документы курса, ключевые выводы и проверенные
+          команды в одном месте. Ее можно открыть напрямую из корня репозитория:
+          <code>index.html</code>.
+        </p>
+        <div class="search">
+          <input id="search" type="search" placeholder="Поиск по index: ssh, u-boot, device tree, adc, iio, vpn, kernel...">
+        </div>
+      </div>
+
+      <section id="status" class="search-block">
+        <h2>Текущее состояние</h2>
+        <div class="status-grid">
+          <div class="status item">
+            <h3>Плата</h3>
+            <p>BeagleBone Black, загрузка с microSD.</p>
+            <div class="tag-row">
+              <span class="tag">Debian 12</span>
+              <span class="tag">armv7l</span>
+              <span class="tag">microSD</span>
+            </div>
+          </div>
+          <div class="status item">
+            <h3>Ядро</h3>
+            <p><code>Linux BeagleBone 6.12.76-bone50</code></p>
+            <div class="tag-row">
+              <span class="tag">kernel headers OK</span>
+              <span class="tag">Kbuild OK</span>
+            </div>
+          </div>
+          <div class="status item">
+            <h3>Host-target сеть</h3>
+            <p>SSH работает через Ethernet с точечным обходом VPN.</p>
+            <div class="tag-row">
+              <span class="tag">host eno0 10.129.1.110</span>
+              <span class="tag">BBB eth0 10.129.1.152</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="docs" class="search-block">
+        <h2>Документы курса</h2>
+        <div class="card-grid">
+          <div class="card item">
+            <h3><a href="README.md">README</a></h3>
+            <p>Карта курса, общий замысел и ссылки на основные документы.</p>
+            <div class="tag-row"><span class="tag">entry</span><span class="tag">course map</span></div>
+          </div>
+          <div class="card item">
+            <h3><a href="REPORT.md">REPORT</a></h3>
+            <p>Полный журнал работ: команды, результаты, выводы.</p>
+            <div class="tag-row"><span class="tag">log</span><span class="tag">results</span></div>
+          </div>
+          <div class="card item">
+            <h3><a href="NEXT_SESSION.md">NEXT_SESSION</a></h3>
+            <p>Краткий playbook для продолжения работы после паузы.</p>
+            <div class="tag-row"><span class="tag">resume</span><span class="tag">checklist</span></div>
+          </div>
+        </div>
+
+        <details open class="item">
+          <summary>Часть 1. Установка Linux и boot chain</summary>
+          <div class="details-body">
+            <ul class="doc-list">
+              <li>
+                <strong><a href="course/01-boot-chain.md">01. Boot chain</a></strong>
+                <span>AM335x Boot ROM, SPL/MLO, U-Boot, kernel, Device Tree, rootfs.</span>
+              </li>
+              <li>
+                <strong><a href="course/02-prepare-sd.md">02. Подготовка microSD</a></strong>
+                <span>Выбор образа, checksum, XZ, запись образа на карту.</span>
+              </li>
+              <li>
+                <strong><a href="course/03-serial-console.md">03. Serial console</a></strong>
+                <span>UART-консоль, minicom, первая загрузка.</span>
+              </li>
+              <li>
+                <strong><a href="course/04-u-boot-environment.md">04. U-Boot environment</a></strong>
+                <span>Остановка autoboot, printenv, mmc, bootargs, загрузка kernel/DTB/initrd.</span>
+              </li>
+              <li>
+                <strong><a href="course/05-linux-device-tree.md">05. Linux Device Tree</a></strong>
+                <span>Device Tree, overlays, driver matching, IIO ADC, userspace ABI.</span>
+              </li>
+              <li>
+                <strong><a href="course/06-host-target-network.md">06. Host-target network</a></strong>
+                <span>Ethernet, SSH, SCP/rsync, диагностика VPN route и обход через table 7113.</span>
+              </li>
+            </ul>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>Часть 2. Модули ядра и драйверы</summary>
+          <div class="details-body">
+            <ul class="doc-list">
+              <li>
+                <strong><a href="course/20-kernel-modules-roadmap.md">20. Roadmap: kernel modules and ADC</a></strong>
+                <span>Hello World module, встроенный ADC, внешний ADS1115, IIO и инженерные величины.</span>
+              </li>
+            </ul>
+          </div>
+        </details>
+      </section>
+
+      <section id="theory" class="search-block">
+        <h2>Учебная теория</h2>
+        <ul class="concept-list">
+          <li class="item">
+            <strong>Boot chain</strong>
+            <span>Boot ROM запускает SPL/MLO, затем полный U-Boot, затем kernel, final Device Tree, initrd и rootfs.</span>
+          </li>
+          <li class="item">
+            <strong>U-Boot</strong>
+            <span>Загружает kernel, DTB, DTBO overlays, initrd и bootargs. Root filesystem целиком в RAM не загружает.</span>
+          </li>
+          <li class="item">
+            <strong>Device Tree</strong>
+            <span>Паспорт железа для Linux kernel: адреса, IRQ, clocks, pinmux, status, compatible.</span>
+          </li>
+          <li class="item">
+            <strong>Driver matching</strong>
+            <span>Kernel сопоставляет <code>compatible</code> из DT с <code>of_match_table</code> драйвера и вызывает <code>probe()</code>.</span>
+          </li>
+          <li class="item">
+            <strong>DT property и поведение</strong>
+            <span>Свойство Device Tree меняет поведение только если драйвер реально его читает.</span>
+          </li>
+          <li class="item">
+            <strong>IIO и userspace ABI</strong>
+            <span>Драйвер ADC создает IIO device, userspace читает <code>in_voltageN_raw</code> и <code>in_voltage_scale</code>.</span>
+          </li>
+          <li class="item">
+            <strong>Host-target workflow</strong>
+            <span>VS Code на хосте, передача по SSH/SCP/rsync, проверка на BeagleBone через make/insmod/dmesg.</span>
+          </li>
+        </ul>
+      </section>
+
+      <section id="commands" class="search-block">
+        <h2>База команд</h2>
+
+        <details open class="item">
+          <summary>Host-target сеть и SSH</summary>
+          <div class="details-body">
+            <div class="cmd" data-title="Проверить маршрут к BeagleBone">
+              <div class="cmd-head"><span>Проверить, не уводит ли VPN маршрут к плате</span><button class="copy">Copy</button></div>
+              <pre><code>ip route get 10.129.1.152</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Восстановить обход VPN">
+              <div class="cmd-head"><span>Добавить route до платы в VPN policy table 7113</span><button class="copy">Copy</button></div>
+              <pre><code>sudo ip route replace 10.129.1.152/32 dev eno0 src 10.129.1.110 table 7113</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Проверить SSH">
+              <div class="cmd-head"><span>Проверить SSH без интерактивной сессии</span><button class="copy">Copy</button></div>
+              <pre><code>ssh andrey@10.129.1.152 'hostname; uname -r; whoami'</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Проверить SCP">
+              <div class="cmd-head"><span>Передать тестовый файл с хоста на плату</span><button class="copy">Copy</button></div>
+              <pre><code>printf 'bbb host to target transfer test\n' > /tmp/bbb_ssh_transfer_test.txt
+scp /tmp/bbb_ssh_transfer_test.txt andrey@10.129.1.152:/home/andrey/
+ssh andrey@10.129.1.152 'cat /home/andrey/bbb_ssh_transfer_test.txt'</code></pre>
+            </div>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>Проверка Linux runtime</summary>
+          <div class="details-body">
+            <div class="cmd" data-title="Версия ядра">
+              <div class="cmd-head"><span>Зафиксировать running kernel</span><button class="copy">Copy</button></div>
+              <pre><code>uname -a</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Kernel command line">
+              <div class="cmd-head"><span>Проверить bootargs, rootfs и console</span><button class="copy">Copy</button></div>
+              <pre><code>cat /proc/cmdline</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Разделы microSD/eMMC">
+              <div class="cmd-head"><span>Сопоставить mmcblk0/mmcblk1 и mount points</span><button class="copy">Copy</button></div>
+              <pre><code>lsblk -o NAME,SIZE,FSTYPE,LABEL,PARTUUID,MOUNTPOINTS</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Kernel headers">
+              <div class="cmd-head"><span>Проверить Kbuild link для сборки модулей</span><button class="copy">Copy</button></div>
+              <pre><code>ls -ld /lib/modules/$(uname -r)/build</code></pre>
+            </div>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>Device Tree</summary>
+          <div class="details-body">
+            <div class="cmd" data-title="Модель платы">
+              <div class="cmd-head"><span>Прочитать model из Device Tree</span><button class="copy">Copy</button></div>
+              <pre><code>tr -d '\0' &lt; /proc/device-tree/model; echo</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Обход Device Tree">
+              <div class="cmd-head"><span>Посмотреть верхние уровни итогового DT</span><button class="copy">Copy</button></div>
+              <pre><code>find -L /proc/device-tree -maxdepth 2 -type d | head -n 80</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Примененные overlays">
+              <div class="cmd-head"><span>Посмотреть marker-файлы примененных overlays</span><button class="copy">Copy</button></div>
+              <pre><code>find -L /proc/device-tree/chosen/overlays -maxdepth 1 -type f -print</code></pre>
+            </div>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>ADC через IIO</summary>
+          <div class="details-body">
+            <div class="cmd" data-title="Найти IIO устройства">
+              <div class="cmd-head"><span>Найти IIO devices и имя драйвера</span><button class="copy">Copy</button></div>
+              <pre><code>for dev in /sys/bus/iio/devices/iio:device*; do
+  echo "=== $dev ==="
+  cat "$dev/name" 2&gt;/dev/null
+done</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Прочитать raw ADC">
+              <div class="cmd-head"><span>Прочитать все raw-коды ADC</span><button class="copy">Copy</button></div>
+              <pre><code>adc_dev=/sys/bus/iio/devices/iio:device0
+for f in "$adc_dev"/in_voltage*_raw; do
+  echo -n "$(basename "$f"): "
+  cat "$f"
+done</code></pre>
+            </div>
+
+            <div class="cmd" data-title="ADC scale">
+              <div class="cmd-head"><span>Прочитать коэффициент пересчета raw -> mV</span><button class="copy">Copy</button></div>
+              <pre><code>cat /sys/bus/iio/devices/iio:device0/in_voltage_scale</code></pre>
+            </div>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>U-Boot</summary>
+          <div class="details-body">
+            <div class="note">
+              Эти команды выполняются в U-Boot prompt <code>=&gt;</code>, а не в Linux shell.
+            </div>
+            <div class="cmd" data-title="U-Boot version">
+              <div class="cmd-head"><span>Версия U-Boot и toolchain</span><button class="copy">Copy</button></div>
+              <pre><code>version</code></pre>
+            </div>
+
+            <div class="cmd" data-title="U-Boot board info">
+              <div class="cmd-head"><span>RAM, relocation, MAC, FDT address</span><button class="copy">Copy</button></div>
+              <pre><code>bdinfo</code></pre>
+            </div>
+
+            <div class="cmd" data-title="MMC partitions">
+              <div class="cmd-head"><span>Список MMC устройств и разделов</span><button class="copy">Copy</button></div>
+              <pre><code>mmc list
+mmc dev 0
+mmc part</code></pre>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section id="workflow" class="search-block">
+        <h2>Рабочий цикл разработки</h2>
+        <div class="card-grid">
+          <div class="card item">
+            <h3>1. Редактирование</h3>
+            <p>Пишем код и документацию в VS Code на Linux-хосте.</p>
+          </div>
+          <div class="card item">
+            <h3>2. Передача</h3>
+            <p>Передаем файлы на BeagleBone через SSH/SCP/rsync по Ethernet.</p>
+          </div>
+          <div class="card item">
+            <h3>3. Проверка</h3>
+            <p>На плате выполняем make, insmod, dmesg, rmmod и runtime checks.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="next" class="search-block">
+        <h2>Следующие шаги</h2>
+        <ul class="concept-list">
+          <li class="item">
+            <strong>Закрыть коммит документации</strong>
+            <span>Сейчас зафиксированы Device Tree/IIO, network/SSH и host-target workflow.</span>
+          </li>
+          <li class="item">
+            <strong>Создать каталог модулей</strong>
+            <span>Например, <code>modules/hello</code> с первым out-of-tree kernel module.</span>
+          </li>
+          <li class="item">
+            <strong>Hello World module</strong>
+            <span>Собрать под <code>6.12.76-bone50</code>, передать на плату, проверить <code>dmesg</code>.</span>
+          </li>
+        </ul>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const search = document.getElementById('search');
+    const blocks = Array.from(document.querySelectorAll('.item'));
+
+    search.addEventListener('input', () => {
+      const query = search.value.trim().toLowerCase();
+
+      blocks.forEach((block) => {
+        const text = block.textContent.toLowerCase();
+        block.classList.toggle('hidden', query && !text.includes(query));
+      });
+    });
+
+    document.querySelectorAll('.copy').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const cmd = button.closest('.cmd').querySelector('code').innerText;
+        try {
+          await navigator.clipboard.writeText(cmd);
+          const old = button.textContent;
+          button.textContent = 'Copied';
+          setTimeout(() => {
+            button.textContent = old;
+          }, 1200);
+        } catch {
+          button.textContent = 'Select text';
+        }
+      });
+    });
+  </script>
+</body>
+</html>
