@@ -152,6 +152,56 @@ U-Boot:
 если видно приглашение "=>", мы находимся в интерактивной консоли U-Boot
 ```
 
+Если вместо `=>` видно приглашение Linux:
+
+```text
+andrey@BeagleBone:~$
+```
+
+значит autoboot уже завершился, ядро Linux запущено, и мы находимся в обычной
+Debian shell. Команды `version`, `bdinfo`, `mmc list` в этой shell не являются
+командами Linux, поэтому ответ вида `command not found` ожидаем.
+
+В таком случае нужно не продолжать вводить U-Boot команды в Linux, а
+перезагрузить плату и остановить autoboot раньше:
+
+```sh
+sudo reboot
+```
+
+После начала перезагрузки смотреть UART-лог и нажать `Space` или любую клавишу
+на строке `Hit any key to stop autoboot` / `Press SPACE to abort autoboot`.
+
+В нашей сборке U-Boot строка может выглядеть так:
+
+```text
+Press SPACE to abort autoboot in 0 seconds
+```
+
+Это означает, что `bootdelay` фактически равен нулю. Окно для остановки почти
+отсутствует, поэтому нажимать пробел после того, как строка уже появилась,
+обычно поздно.
+
+Практический прием для такого случая:
+
+```text
+1. Открыть minicom на /dev/ttyUSB0.
+2. Полностью снять питание с BeagleBone Black.
+3. Поставить курсор в окно minicom.
+4. Зажать и держать Space.
+5. Не отпуская Space, подать питание на плату.
+6. Держать Space до появления приглашения U-Boot "=>".
+```
+
+Если это не сработало, проверить в `minicom`, что выключены flow control:
+
+```text
+Ctrl-A, O
+Serial port setup
+Hardware Flow Control: No
+Software Flow Control: No
+```
+
 ## 5. Безопасный маршрут команд
 
 Вводить команды по одной. Не выполнять `saveenv`.
@@ -399,7 +449,101 @@ dtbs/
 `printenv`. В разных образах структура может отличаться, но в нашей успешной
 загрузке U-Boot явно читал `/boot/uEnv.txt` и файлы ядра.
 
-## 11. printenv: читать, но не менять
+## 11. Что U-Boot загружает перед стартом Linux
+
+На этом этапе важно разделить два действия:
+
+```text
+прочитать файл с microSD
+        |
+        v
+положить его в RAM по конкретному адресу
+```
+
+U-Boot не запускает Linux прямо с файла на microSD. Он сначала читает нужные
+файлы в оперативную память, подготавливает Device Tree и kernel command line, а
+затем передает управление ядру.
+
+Учебная карта загрузки:
+
+```text
+Файл / данные                     Куда попадает             Зачем
+--------------------------------------------------------------------------------
+/boot/uEnv.txt                    временно в loadaddr       импорт настроек boot
+/boot/vmlinuz-...                 loadaddr/kernel_addr_r    Linux kernel image
+/boot/dtbs/.../*.dtb              fdtaddr/fdt_addr_r        описание платы
+/boot/dtbs/.../*.dtbo             временно в rdaddr         overlay для DTB
+/boot/initrd.img-...              rdaddr/ramdisk_addr_r     initial RAM disk
+kernel command line               bootargs                  параметры Linux
+```
+
+Типовая команда передачи управления выглядит так:
+
+```text
+bootz <kernel_addr> <initrd_addr>:<initrd_size> <fdt_addr>
+```
+
+В нашей загрузке из boot log:
+
+```text
+bootz 0x82000000 0x88080000:8518de 88000000
+```
+
+Расшифровка:
+
+```text
+0x82000000            адрес kernel image
+0x88080000:8518de     адрес и размер initrd
+0x88000000            адрес Device Tree Blob
+```
+
+Что U-Boot не загружает целиком:
+
+- весь root filesystem;
+- весь Debian userspace;
+- `sysconf.txt` как часть boot chain.
+
+Root filesystem остается на microSD. U-Boot только передает ядру параметр вида
+`root=...`, чтобы Linux уже сам смонтировал корневую файловую систему.
+
+`sysconf.txt` применяется позднее, когда Linux уже запустил userspace-сервис
+первичной настройки.
+
+Важно также не путать Device Tree с самими устройствами. Device Tree - это не
+драйверы и не периферия, а описание железа для ядра:
+
+```text
+какие контроллеры есть в SoC
+по каким адресам доступны их регистры
+какие IRQ, clocks и resets используются
+какие устройства включены или отключены
+какой pinmux нужен
+какие overlays применены
+```
+
+BeagleBone Black построен не на микроконтроллере, а на SoC TI AM335x. Внутри
+SoC есть CPU ARM Cortex-A8 и периферия: UART, I2C, SPI, GPIO, MMC, ADC, PWM,
+USB, Ethernet и другие блоки. U-Boot загружает в RAM описание этих блоков, а
+Linux kernel уже по этому описанию подбирает и запускает драйверы.
+
+Итоговая картина на момент `Starting kernel ...`:
+
+```text
+в RAM:
+  Linux kernel image
+  final Device Tree Blob
+  initrd / initramfs
+  kernel command line
+
+на microSD:
+  root filesystem Debian на /dev/mmcblk0p3
+  BOOT/sysconf.txt на /dev/mmcblk0p1
+
+в железе:
+  реальные устройства SoC и платы
+```
+
+## 12. printenv: читать, но не менять
 
 Команда:
 
@@ -457,7 +601,7 @@ fdtaddr:
 rdaddr:
 ```
 
-## 12. bootargs и /proc/cmdline
+## 13. bootargs и /proc/cmdline
 
 `bootargs` - это строка параметров, которую U-Boot передает Linux kernel.
 
@@ -489,7 +633,7 @@ kernel command line
 - `rootfstype=ext4` - тип root filesystem.
 - `rootwait` - ждать появления MMC-устройства.
 
-## 13. Вернуться к обычной загрузке
+## 14. Вернуться к обычной загрузке
 
 Когда команды просмотрены, продолжить загрузку:
 
@@ -517,7 +661,7 @@ lsblk
 Смысл проверки: сопоставить то, что мы увидели в U-Boot, с тем, как Linux
 фактически загрузился.
 
-## 14. Таблица наблюдений для занятия
+## 15. Таблица наблюдений для занятия
 
 Заполнить после выполнения практики.
 
@@ -536,7 +680,7 @@ lsblk
 Что передано в console=
 ```
 
-## 15. Контрольные вопросы
+## 16. Контрольные вопросы
 
 1. Почему Boot ROM не загружает Linux kernel напрямую?
 2. Зачем нужен SPL / MLO перед полным U-Boot?
@@ -545,7 +689,7 @@ lsblk
 5. Какой параметр говорит Linux, где искать root filesystem?
 6. Почему во время этого занятия не выполняем `saveenv`?
 
-## 16. Мини-практика
+## 17. Мини-практика
 
 Выполнить без изменения настроек:
 
