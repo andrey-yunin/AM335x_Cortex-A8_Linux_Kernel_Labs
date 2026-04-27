@@ -1,0 +1,13 @@
+# Local Codex state
+.codex
+
+# Downloaded BeagleBoard disk images
+images/*.img
+images/*.img.xz
+images/*.img.xz.empty
+
+# Editor and OS noise
+*~
+*.swp
+*.swo
+.DS_Store
