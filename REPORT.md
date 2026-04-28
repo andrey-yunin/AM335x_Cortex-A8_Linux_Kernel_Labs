@@ -2999,3 +2999,824 @@ U-Boot inspection
 - поиск по странице;
 - кнопки копирования команд;
 - ссылки на все основные документы курса.
+
+## 2026-04-28
+
+### Уточнение режима работы ассистента
+
+Создан файл:
+
+```text
+ASSISTANT_RULES.md
+```
+
+Назначение файла - фиксировать правила работы для следующих сессий:
+
+- ассистент работает как учитель-консультант;
+- практические команды на хосте и BeagleBone Black обычно выполняет
+  пользователь;
+- ассистент дает команду, объясняет смысл действия, ожидаемый результат и
+  интерпретацию;
+- документацию проекта ассистент может править сам;
+- команды, сборку, SSH-действия и изменения кода ассистент выполняет только по
+  явному запросу пользователя.
+
+### Решение по маршруту к BeagleBone Black
+
+После перезагрузки или перезапуска VPN маршрут к плате снова может уходить через
+VPN policy table:
+
+```text
+10.129.1.152 via 10.0.85.5 dev outline-tun1 table 7113 src 10.0.85.5
+```
+
+Проверка интерфейса хоста показала, что рабочий адрес Ethernet не изменился:
+
+```text
+eno0 UP 10.129.1.110/23
+```
+
+Принятое решение: не делать исключение постоянной системной настройкой.
+Временный route восстанавливается вручную только на время работы с BeagleBone
+Black. Это уменьшает риск оставить в системе ненужную лабораторную настройку
+после завершения работы с платой.
+
+Рабочие параметры:
+
+```text
+BeagleBone IP: 10.129.1.152
+host interface: eno0
+host source IP: 10.129.1.110
+VPN policy table: 7113
+```
+
+Ручная команда восстановления:
+
+```sh
+sudo ip route replace 10.129.1.152/32 dev eno0 src 10.129.1.110 table 7113
+```
+
+Ожидаемый результат проверки:
+
+```text
+10.129.1.152 dev eno0 table 7113 src 10.129.1.110
+```
+
+### Helper-скрипт для временного маршрута
+
+Добавлен скрипт:
+
+```text
+scripts/bbb-route.sh
+```
+
+Скрипт не делает настройку постоянной и не изменяет конфигурацию systemd,
+NetworkManager или VPN. Он только упрощает ручные операции:
+
+```sh
+sh scripts/bbb-route.sh check
+sh scripts/bbb-route.sh apply
+sh scripts/bbb-route.sh delete
+```
+
+Режимы:
+
+- `check` - показать текущий маршрут к BeagleBone Black;
+- `apply` - добавить или заменить временный route в table `7113`;
+- `delete` - удалить временный route из table `7113`.
+
+### Проверка build tree для первого kernel module
+
+На BeagleBone Black выполнена проверка текущего ядра:
+
+```sh
+hostname
+uname -r
+whoami
+pwd
+```
+
+Результат:
+
+```text
+BeagleBone
+6.12.76-bone50
+andrey
+/home/andrey
+```
+
+Проверен стандартный путь Kbuild для сборки внешних модулей:
+
+```sh
+ls -ld /lib/modules/$(uname -r)/build
+readlink -f /lib/modules/$(uname -r)/build
+```
+
+Результат:
+
+```text
+/lib/modules/6.12.76-bone50/build -> /usr/src/linux-headers-6.12.76-bone50
+/usr/src/linux-headers-6.12.76-bone50
+```
+
+Вывод:
+
+- `/lib/modules/$(uname -r)/build` существует;
+- `build` является symbolic link на каталог headers текущего ядра;
+- kernel headers для `6.12.76-bone50` установлены;
+- первый out-of-tree модуль можно пробовать собирать прямо на BeagleBone
+  Black.
+
+### Проверка инструментов сборки на BeagleBone Black
+
+На target проверено наличие минимальных инструментов для сборки модуля:
+
+```sh
+which make gcc ld
+make --version | head -n 1
+gcc --version | head -n 1
+ld --version | head -n 1
+```
+
+Результат:
+
+```text
+/usr/bin/make
+/usr/bin/gcc
+/usr/bin/ld
+GNU Make 4.3
+gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+GNU ld (GNU Binutils for Debian) 2.40
+```
+
+Вывод:
+
+- `make`, `gcc` и `ld` установлены на BeagleBone Black;
+- target готов к первой сборке out-of-tree модуля через Kbuild;
+- сборку первого модуля можно выполнить на плате, а исходники при этом держать
+  в репозитории на хосте.
+
+### Уточнение host/target workflow
+
+Уточнен рабочий процесс для первого kernel module.
+
+Правильная схема:
+
+```text
+Linux host / VS Code
+  -> редактирование modules/hello/hello.c и Makefile
+  -> передача на BeagleBone по SSH/SCP/rsync
+  -> сборка и проверка на BeagleBone
+```
+
+Причина: исходники курса должны жить в git-репозитории на хосте, а BeagleBone
+Black используется как target с реальным ядром `6.12.76-bone50`, headers и
+Kbuild environment.
+
+При интерактивном входе по SSH prompt меняется на target:
+
+```text
+andrey@BeagleBone:~$
+```
+
+При разовой SSH-команде:
+
+```sh
+ssh andrey@10.129.1.152 'hostname; uname -r; whoami'
+```
+
+команда внутри кавычек выполняется на BeagleBone, но после завершения SSH
+пользователь возвращается в shell хоста:
+
+```text
+andrey@andrey-yunin:~/projects/BeagleBone_Black$
+```
+
+Для снижения путаницы принято использовать два окна терминала:
+
+```text
+Окно 1: BeagleBone Black через интерактивный SSH
+Окно 2: Linux host в репозитории ~/projects/BeagleBone_Black
+```
+
+### Каталог первого модуля на хосте
+
+На Linux-хосте в репозитории создан каталог:
+
+```sh
+mkdir -p modules/hello
+ls -ld modules modules/hello
+```
+
+Результат:
+
+```text
+drwxrwxr-x 3 andrey andrey 4096 апр 28 09:38 modules
+drwxrwxr-x 2 andrey andrey 4096 апр 28 09:38 modules/hello
+```
+
+Пояснение по `mkdir -p`:
+
+- `-p` означает `parents`;
+- команда создает всю цепочку недостающих каталогов;
+- если каталог уже существует, это не считается ошибкой;
+- одного аргумента с вложенным путем достаточно, например
+  `mkdir -p modules/hello`.
+
+Также разобрана команда просмотра части файла:
+
+```sh
+sed -n '1,120p' modules/hello/hello.c
+```
+
+Пояснение:
+
+- `sed` - stream editor, здесь используется как просмотрщик выбранного диапазона
+  строк;
+- `-n` отключает автоматическую печать всех строк;
+- `'1,120p'` печатает строки с 1 по 120;
+- последний аргумент - путь к файлу.
+
+Команды `mkdir -p` и `sed -n '1,120p'` добавлены в HTML-справочник
+`index.html` в раздел базовых shell-команд.
+
+### Начало разбора исходника hello kernel module
+
+Для первого модуля выбран минимальный исходник:
+
+```c
+#include <linux/init.h>
+#include <linux/module.h>
+
+static int __init bbb_hello_init(void)
+{
+    pr_info("bbb_hello: init\n");
+    return 0;
+}
+
+static void __exit bbb_hello_exit(void)
+{
+    pr_info("bbb_hello: exit\n");
+}
+
+module_init(bbb_hello_init);
+module_exit(bbb_hello_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Andrey");
+MODULE_DESCRIPTION("Minimal BeagleBone Black hello kernel module");
+```
+
+На хосте VS Code может подсвечивать ошибки для:
+
+```c
+#include <linux/init.h>
+#include <linux/module.h>
+```
+
+Причина: это kernel headers target-ядра, а не обычные userspace C headers.
+Headers текущего target-ядра находятся на BeagleBone Black:
+
+```text
+/usr/src/linux-headers-6.12.76-bone50
+```
+
+Поэтому подсветка VS Code на хосте является проблемой IntelliSense, а не
+доказательством ошибки сборки. Реальная проверка будет выполняться Kbuild на
+BeagleBone Black.
+
+Разобрана модель init/exit функций:
+
+- имена `bbb_hello_init` и `bbb_hello_exit` выбраны разработчиком;
+- стандартным является механизм регистрации через `module_init()` и
+  `module_exit()`;
+- init-функция имеет тип `int`, потому что загрузка модуля может завершиться
+  успешно или с ошибкой;
+- `return 0` означает успешную загрузку;
+- при ошибке init-функция вернула бы отрицательный errno, например `-ENOMEM`,
+  `-ENODEV` или `-EINVAL`;
+- exit-функция имеет тип `void`, потому что при выгрузке она не принимает
+  решение о результате, а освобождает ресурсы;
+- `__init` и `__exit` являются kernel-аннотациями для размещения кода в
+  специальных секциях;
+- `static` ограничивает видимость функций текущим `.c` файлом.
+
+### Kernel logging: pr_info и printk
+
+Разобран вывод сообщений из kernel module.
+
+В первом модуле используется:
+
+```c
+pr_info("bbb_hello: init\n");
+```
+
+Вывод:
+
+- `pr_info()` - стандартный kernel logging macro для информационных сообщений;
+- сообщение пишется в kernel log, а не обязательно прямо в текущий терминал;
+- читать сообщения можно через `dmesg` или `journalctl -k`;
+- в ядре не используется обычный userspace `printf()` как основной интерфейс
+  вывода, потому что у модуля ядра нет стандартного `stdout`;
+- `pr_info()` по смыслу близок к `printk(KERN_INFO "...")`;
+- `printk()` является более базовым интерфейсом, где уровень лога обычно
+  указывается явно через `KERN_INFO`, `KERN_WARNING`, `KERN_ERR` и т.п.;
+- для настоящих драйверов устройств при наличии `struct device *dev` часто
+  предпочтительнее `dev_info()`, `dev_err()` и другие `dev_*()` helpers,
+  потому что они добавляют контекст конкретного устройства.
+
+### Начальный debugging workflow для kernel module
+
+Зафиксирована базовая модель отладки первого kernel module.
+
+Короткая схема:
+
+```text
+1. Kbuild проверяет совместимость с headers/API текущего ядра.
+2. insmod/rmmod проверяют загрузку и выгрузку модуля.
+3. dmesg или journalctl -k показывают kernel log.
+4. pr_info/pr_err/pr_debug помогают отслеживать выполнение кода.
+```
+
+Для учебного модуля допустимо ставить информационные сообщения в ключевые
+точки:
+
+```c
+pr_info("bbb_hello: init enter\n");
+pr_info("bbb_hello: init done\n");
+pr_info("bbb_hello: exit enter\n");
+```
+
+В более аккуратном драйверном коде уровни разделяются:
+
+```c
+pr_info("initialized\n");
+pr_err("failed: %d\n", ret);
+pr_debug("value=%d\n", value);
+```
+
+Базовый цикл первого этапа:
+
+```text
+редактировать на хосте
+  -> передать на BBB
+  -> собрать через Kbuild
+  -> загрузить insmod
+  -> проверить dmesg
+  -> выгрузить rmmod
+  -> проверить dmesg
+  -> исправить код
+```
+
+Более тяжелые инструменты (`dynamic debug`, `debugfs`, `ftrace`, `tracepoints`,
+`perf`, `kgdb`, `JTAG`) оставлены для следующих этапов после освоения базового
+цикла.
+
+### Подготовка исходников первого модуля на хосте
+
+Исходники первого kernel module создавались на Linux-хосте в репозитории, а не
+на BeagleBone Black напрямую.
+
+Рабочий каталог на хосте:
+
+```text
+/home/andrey/projects/BeagleBone_Black
+```
+
+Создан файл:
+
+```text
+modules/hello/hello.c
+```
+
+Проверка содержимого на хосте:
+
+```sh
+sed -n '1,120p' modules/hello/hello.c
+```
+
+Итоговое содержимое:
+
+```c
+#include <linux/init.h>
+#include <linux/module.h>
+
+static int __init bbb_hello_init(void)
+{
+    pr_info("bbb_hello: init\n");
+    return 0;
+}
+
+static void __exit bbb_hello_exit(void)
+{
+    pr_info("bbb_hello: exit\n");
+}
+
+module_init(bbb_hello_init);
+module_exit(bbb_hello_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Andrey");
+MODULE_DESCRIPTION("Minimal BeagleBone Black hello kernel module");
+```
+
+Сначала в файле были лишние отступы перед top-level объявлениями:
+
+```c
+  static int __init ...
+  module_init(...)
+  MODULE_LICENSE(...)
+```
+
+Для C-компилятора это допустимо, но для учебного kernel-style принято решение
+выровнять top-level объявления без начальных пробелов.
+
+### Makefile для Kbuild
+
+На хосте создан файл:
+
+```text
+modules/hello/Makefile
+```
+
+Содержимое:
+
+```make
+obj-m += hello.o
+```
+
+Проверка:
+
+```sh
+sed -n '1,40p' modules/hello/Makefile
+```
+
+Результат:
+
+```text
+obj-m += hello.o
+```
+
+Пояснение:
+
+- `obj-m` - специальная переменная Kbuild;
+- `m` означает module, то есть сборку загружаемого `.ko`;
+- `+=` добавляет объект в список модулей;
+- `hello.o` собирается из `hello.c`;
+- итоговая цепочка: `hello.c -> hello.o -> hello.ko`.
+
+Изначально перед `obj-m` был лишний отступ:
+
+```make
+  obj-m += hello.o
+```
+
+Для этой строки Makefile это не должно ломать сборку, но отступы в Makefile
+имеют особое значение, поэтому строка была приведена к чистому виду без
+начальных пробелов.
+
+### Синхронизация исходников на BeagleBone Black
+
+Передача исходников с хоста на target выполнена через `rsync`:
+
+```sh
+rsync -av modules/hello/ andrey@10.129.1.152:/home/andrey/bbb-course/modules/hello/
+```
+
+Пояснение команды:
+
+- `rsync` синхронизирует файлы и каталоги;
+- `-a` включает archive mode: рекурсивная передача, сохранение структуры, прав
+  и временных меток;
+- `-v` включает verbose output;
+- `modules/hello/` - источник на хосте;
+- финальный `/` после `hello/` означает передачу содержимого каталога, а не
+  создание вложенного каталога `hello/hello`;
+- `andrey@10.129.1.152:` - SSH-доступ к BeagleBone Black;
+- `/home/andrey/bbb-course/modules/hello/` - каталог назначения на target.
+
+Результат синхронизации:
+
+```text
+sending incremental file list
+./
+Makefile
+hello.c
+
+sent 641 bytes  received 57 bytes  55,84 bytes/sec
+total size is 442  speedup is 0,63
+```
+
+Вывод:
+
+- SSH/SCP/rsync workflow работает;
+- на target переданы `Makefile` и `hello.c`;
+- исходники продолжают жить в git-репозитории на хосте;
+- BeagleBone используется для сборки и проверки под своим running kernel.
+
+### Проверка исходников на BeagleBone Black перед сборкой
+
+На BeagleBone Black выполнен переход в каталог модуля:
+
+```sh
+cd ~/bbb-course/modules/hello
+```
+
+Проверка файлов:
+
+```sh
+ls -l
+```
+
+Результат:
+
+```text
+total 8
+-rw-rw-r-- 1 andrey andrey  17 Apr 28 10:50 Makefile
+-rw-rw-r-- 1 andrey andrey 425 Apr 28 10:15 hello.c
+```
+
+После исправления форматирования и повторной синхронизации проверено итоговое
+содержимое:
+
+```sh
+sed -n '1,120p' hello.c
+sed -n '1,120p' Makefile
+```
+
+Ключевой результат:
+
+```text
+obj-m += hello.o
+```
+
+и `hello.c` без лишних top-level отступов. После этой проверки каталог target
+готов к сборке через Kbuild.
+
+### Сборка первого Hello kernel module
+
+На BeagleBone Black в каталоге:
+
+```text
+/home/andrey/bbb-course/modules/hello
+```
+
+выполнена сборка внешнего модуля:
+
+```sh
+make -C /lib/modules/$(uname -r)/build M=$PWD modules
+```
+
+Пояснение команды:
+
+- `make` запускает систему сборки;
+- `-C /lib/modules/$(uname -r)/build` переводит `make` в build tree текущего
+  ядра;
+- `$(uname -r)` подставляет `6.12.76-bone50`;
+- `M=$PWD` сообщает Kbuild, что внешний модуль находится в текущем каталоге;
+- `modules` - цель Kbuild для сборки модулей.
+
+Результат сборки:
+
+```text
+make: Entering directory '/usr/src/linux-headers-6.12.76-bone50'
+  CC [M]  /home/andrey/bbb-course/modules/hello/hello.o
+  MODPOST /home/andrey/bbb-course/modules/hello/Module.symvers
+  CC [M]  /home/andrey/bbb-course/modules/hello/hello.mod.o
+  CC [M]  /home/andrey/bbb-course/modules/hello/.module-common.o
+  LD [M]  /home/andrey/bbb-course/modules/hello/hello.ko
+make: Leaving directory '/usr/src/linux-headers-6.12.76-bone50'
+```
+
+Итоговый файл:
+
+```text
+hello.ko
+```
+
+Ключевые файлы после сборки:
+
+- `hello.c` - исходник;
+- `Makefile` - инструкция для Kbuild;
+- `hello.o` - объектный файл из `hello.c`;
+- `hello.mod.c` - сгенерированный Kbuild файл с metadata;
+- `hello.mod.o` - объект metadata;
+- `hello.ko` - итоговый загружаемый kernel module;
+- `Module.symvers` - таблица символов;
+- `modules.order` - порядок модулей;
+- `.hello.*.cmd` - служебные файлы Kbuild с командами сборки и зависимостями.
+
+### Проверка metadata через modinfo
+
+Попытка выполнить:
+
+```sh
+modinfo hello.ko
+```
+
+дала результат:
+
+```text
+modinfo: команда не найдена
+```
+
+Дополнительно была выполнена команда:
+
+```sh
+sudo apt update
+```
+
+Результат: списки пакетов обновились, но `modinfo` не появился как команда в
+обычном `PATH`. Это ожидаемо: `apt update` только обновляет индексы пакетов и
+не устанавливает новые пакеты.
+
+Важно: сообщение `4 packages can be upgraded` не является указанием обновлять
+систему в рамках этого этапа. Kernel-пакеты и связанные компоненты не обновляем
+без отдельного решения.
+
+Команда `modinfo` не находилась через обычный `PATH`, хотя пакет `kmod` уже был
+установлен:
+
+```sh
+dpkg -l kmod
+```
+
+Результат:
+
+```text
+ii  kmod  30+20221128-1 armhf  tools for managing Linux kernel modules
+```
+
+Проверка показала, что `modinfo` находится в `sbin`:
+
+```sh
+which insmod rmmod lsmod modinfo
+ls -l /usr/sbin/modinfo /sbin/modinfo
+```
+
+Результат:
+
+```text
+/usr/bin/lsmod
+```
+
+и:
+
+```text
+/sbin/modinfo -> /bin/kmod
+/usr/sbin/modinfo -> /bin/kmod
+```
+
+Вывод: у пользователя `andrey` в `PATH` есть `lsmod`, но нет пути к `modinfo`
+в `sbin`. Поэтому для административных утилит модулей на этой системе удобно
+использовать полный путь.
+
+Поэтому использован полный путь:
+
+```sh
+/usr/sbin/modinfo hello.ko
+```
+
+Результат:
+
+```text
+filename:       /home/andrey/bbb-course/modules/hello/hello.ko
+description:    Minimal BeagleBone Black hello kernel module
+author:         Andrey
+license:        GPL
+depends:
+name:           hello
+vermagic:       6.12.76-bone50 preempt mod_unload modversions ARMv7 thumb2 p2v8
+```
+
+Вывод:
+
+- metadata из `MODULE_DESCRIPTION`, `MODULE_AUTHOR`, `MODULE_LICENSE` попала в
+  модуль;
+- `vermagic` соответствует ядру `6.12.76-bone50`;
+- модуль собран под ARMv7 target, а не под x86_64 host.
+
+### Загрузка и выгрузка первого модуля
+
+Перед загрузкой проверен хвост kernel log:
+
+```sh
+dmesg | tail -n 20
+```
+
+Затем модуль загружен:
+
+```sh
+sudo /usr/sbin/insmod hello.ko
+```
+
+`insmod` ничего не вывел, что нормально для успешного выполнения Unix-команды.
+
+Проверка `dmesg` показала:
+
+```text
+[ 7189.137718] hello: loading out-of-tree module taints kernel.
+[ 7189.147553] bbb_hello: init
+```
+
+Вывод:
+
+- модуль загружен в ядро;
+- init-функция `bbb_hello_init()` выполнена;
+- сообщение `pr_info("bbb_hello: init\n")` попало в kernel log;
+- ядро помечено как tainted из-за загрузки out-of-tree модуля.
+
+Проверка `lsmod`:
+
+```sh
+lsmod | grep hello
+```
+
+Результат:
+
+```text
+hello                  12288  0
+```
+
+Расшифровка:
+
+- `hello` - имя модуля;
+- `12288` - размер в памяти;
+- `0` - счетчик использования.
+
+Модуль выгружен:
+
+```sh
+sudo /usr/sbin/rmmod hello
+```
+
+Проверка `dmesg`:
+
+```text
+[ 7328.004583] bbb_hello: exit
+```
+
+Проверка:
+
+```sh
+lsmod | grep hello
+```
+
+не вывела строк, значит модуль больше не загружен.
+
+Итог: первый out-of-tree kernel module успешно прошел полный цикл:
+
+```text
+редактирование на хосте
+  -> rsync на BeagleBone
+  -> Kbuild сборка на target
+  -> modinfo
+  -> insmod
+  -> dmesg init
+  -> lsmod
+  -> rmmod
+  -> dmesg exit
+```
+
+### Систематизация HTML-справочника команд
+
+Обновлен справочник команд в:
+
+```text
+index.html
+```
+
+Команды сначала были разнесены по темам текущей работы, затем порядок изменен
+по мере развития курса: от подготовки Linux-хоста и загрузочной цепочки к
+Linux runtime, Device Tree/IIO, host-target workflow и только потом к kernel
+modules.
+
+Актуальные разделы:
+
+```text
+0. Базовые shell-команды
+1. Linux host и подготовка microSD
+2. UART и первая загрузка
+3. U-Boot
+4. Linux runtime на BBB
+5. Device Tree
+6. ADC через IIO
+7. Host-target сеть, SSH и rsync
+8. Kernel modules: подготовка исходников на хосте
+9. Kernel modules: target-среда и Kbuild
+10. Kernel modules: metadata, загрузка и выгрузка
+```
+
+В справочник добавлены команды полного цикла первого модуля:
+
+- создание и проверка `modules/hello`;
+- проверка `hello.c` и `Makefile`;
+- синхронизация через `rsync`;
+- проверка target identity;
+- проверка `/lib/modules/$(uname -r)/build`;
+- проверка `make`, `gcc`, `ld`;
+- сборка через Kbuild;
+- просмотр артефактов сборки;
+- диагностика `kmod`, `PATH` и `modinfo`;
+- `insmod`, `dmesg`, `lsmod`, `rmmod`;
+- альтернативный просмотр kernel log через `journalctl -k`.

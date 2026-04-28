@@ -475,35 +475,123 @@
         <h2>База команд</h2>
 
         <details open class="item">
-          <summary>Host-target сеть и SSH</summary>
+          <summary>0. Базовые shell-команды</summary>
           <div class="details-body">
-            <div class="cmd" data-title="Проверить маршрут к BeagleBone">
-              <div class="cmd-head"><span>Проверить, не уводит ли VPN маршрут к плате</span><button class="copy">Copy</button></div>
-              <pre><code>ip route get 10.129.1.152</code></pre>
+            <div class="cmd" data-title="Текущий каталог">
+              <div class="cmd-head"><span>Показать текущий рабочий каталог</span><button class="copy">Copy</button></div>
+              <pre><code>pwd</code></pre>
+              <p><code>pwd</code> нужен, чтобы не перепутать host project, target shell и U-Boot prompt.</p>
             </div>
 
-            <div class="cmd" data-title="Восстановить обход VPN">
-              <div class="cmd-head"><span>Добавить route до платы в VPN policy table 7113</span><button class="copy">Copy</button></div>
-              <pre><code>sudo ip route replace 10.129.1.152/32 dev eno0 src 10.129.1.110 table 7113</code></pre>
+            <div class="cmd" data-title="Подробный список файлов">
+              <div class="cmd-head"><span>Показать файлы, права и скрытые артефакты</span><button class="copy">Copy</button></div>
+              <pre><code>ls -la</code></pre>
+              <p><code>-l</code> включает подробный формат, <code>-a</code> показывает скрытые файлы вроде <code>.hello.o.cmd</code>.</p>
             </div>
 
-            <div class="cmd" data-title="Проверить SSH">
-              <div class="cmd-head"><span>Проверить SSH без интерактивной сессии</span><button class="copy">Copy</button></div>
-              <pre><code>ssh andrey@10.129.1.152 'hostname; uname -r; whoami'</code></pre>
+            <div class="cmd" data-title="Создать цепочку каталогов">
+              <div class="cmd-head"><span>Создать каталог вместе с родительскими каталогами</span><button class="copy">Copy</button></div>
+              <pre><code>mkdir -p modules/hello</code></pre>
+              <p><code>-p</code> означает parents: создать недостающие каталоги и не считать ошибкой уже существующий путь.</p>
             </div>
 
-            <div class="cmd" data-title="Проверить SCP">
-              <div class="cmd-head"><span>Передать тестовый файл с хоста на плату</span><button class="copy">Copy</button></div>
-              <pre><code>printf 'bbb host to target transfer test\n' > /tmp/bbb_ssh_transfer_test.txt
-scp /tmp/bbb_ssh_transfer_test.txt andrey@10.129.1.152:/home/andrey/
-ssh andrey@10.129.1.152 'cat /home/andrey/bbb_ssh_transfer_test.txt'</code></pre>
+            <div class="cmd" data-title="Показать часть файла через sed">
+              <div class="cmd-head"><span>Показать строки 1..120 из файла</span><button class="copy">Copy</button></div>
+              <pre><code>sed -n '1,120p' modules/hello/hello.c</code></pre>
+              <p><code>-n</code> отключает автоматическую печать всех строк, а <code>'1,120p'</code> печатает только строки с 1 по 120.</p>
             </div>
           </div>
         </details>
 
         <details open class="item">
-          <summary>Проверка Linux runtime</summary>
+          <summary>1. Linux host и подготовка microSD</summary>
           <div class="details-body">
+            <div class="cmd" data-title="Проверить инструменты хоста">
+              <div class="cmd-head"><span>Проверить наличие базовых утилит на Linux-хосте</span><button class="copy">Copy</button></div>
+              <pre><code>which lsblk xzcat sha256sum dd wget minicom</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Снимок блочных устройств">
+              <div class="cmd-head"><span>Безопасно определить microSD по списку дисков</span><button class="copy">Copy</button></div>
+              <pre><code>lsblk -p -o NAME,SIZE,TYPE,MODEL,MOUNTPOINTS</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Проверить checksum образа">
+              <div class="cmd-head"><span>Проверить SHA256 скачанного образа</span><button class="copy">Copy</button></div>
+              <pre><code>sha256sum -c images/am335x-debian-12.13-base-v6.12-armhf-2026-03-17-4gb.img.xz.sha256sum</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Проверить XZ контейнер">
+              <div class="cmd-head"><span>Проверить, что .xz архив читается</span><button class="copy">Copy</button></div>
+              <pre><code>xz -t images/am335x-debian-12.13-base-v6.12-armhf-2026-03-17-4gb.img.xz</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Просмотреть sysconf.txt">
+              <div class="cmd-head"><span>Проверить настройки первого запуска на BOOT-разделе</span><button class="copy">Copy</button></div>
+              <pre><code>sed -n '1,220p' /tmp/bbb-boot/sysconf.txt</code></pre>
+            </div>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>2. UART и первая загрузка</summary>
+          <div class="details-body">
+            <div class="cmd" data-title="Найти USB-UART">
+              <div class="cmd-head"><span>Посмотреть последние kernel messages после подключения адаптера</span><button class="copy">Copy</button></div>
+              <pre><code>dmesg | tail -n 40</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Открыть minicom">
+              <div class="cmd-head"><span>Открыть UART console 115200 8N1</span><button class="copy">Copy</button></div>
+              <pre><code>sudo minicom -D /dev/ttyUSB0 -b 115200</code></pre>
+              <p>Не подключать VCC USB-UART адаптера к debug-разъему BeagleBone Black.</p>
+            </div>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>3. U-Boot</summary>
+          <div class="details-body">
+            <div class="note">
+              Эти команды выполняются в U-Boot prompt <code>=&gt;</code>, а не в Linux shell.
+            </div>
+
+            <div class="cmd" data-title="U-Boot version">
+              <div class="cmd-head"><span>Версия U-Boot и toolchain</span><button class="copy">Copy</button></div>
+              <pre><code>version</code></pre>
+            </div>
+
+            <div class="cmd" data-title="U-Boot board info">
+              <div class="cmd-head"><span>RAM, relocation, MAC, FDT address</span><button class="copy">Copy</button></div>
+              <pre><code>bdinfo</code></pre>
+            </div>
+
+            <div class="cmd" data-title="MMC partitions">
+              <div class="cmd-head"><span>Список MMC устройств и разделов</span><button class="copy">Copy</button></div>
+              <pre><code>mmc list
+mmc dev 0
+mmc part</code></pre>
+            </div>
+
+            <div class="cmd" data-title="U-Boot environment">
+              <div class="cmd-head"><span>Читать environment без сохранения изменений</span><button class="copy">Copy</button></div>
+              <pre><code>printenv</code></pre>
+              <p>Не выполнять <code>saveenv</code> без отдельного явного решения.</p>
+            </div>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>4. Linux runtime на BBB</summary>
+          <div class="details-body">
+            <div class="cmd" data-title="Target identity">
+              <div class="cmd-head"><span>Понять, что команды выполняются на BeagleBone</span><button class="copy">Copy</button></div>
+              <pre><code>hostname
+uname -r
+whoami
+pwd</code></pre>
+            </div>
+
             <div class="cmd" data-title="Версия ядра">
               <div class="cmd-head"><span>Зафиксировать running kernel</span><button class="copy">Copy</button></div>
               <pre><code>uname -a</code></pre>
@@ -519,15 +607,15 @@ ssh andrey@10.129.1.152 'cat /home/andrey/bbb_ssh_transfer_test.txt'</code></pre
               <pre><code>lsblk -o NAME,SIZE,FSTYPE,LABEL,PARTUUID,MOUNTPOINTS</code></pre>
             </div>
 
-            <div class="cmd" data-title="Kernel headers">
-              <div class="cmd-head"><span>Проверить Kbuild link для сборки модулей</span><button class="copy">Copy</button></div>
-              <pre><code>ls -ld /lib/modules/$(uname -r)/build</code></pre>
+            <div class="cmd" data-title="Kernel log">
+              <div class="cmd-head"><span>Посмотреть последние сообщения ядра</span><button class="copy">Copy</button></div>
+              <pre><code>dmesg | tail -n 20</code></pre>
             </div>
           </div>
         </details>
 
         <details open class="item">
-          <summary>Device Tree</summary>
+          <summary>5. Device Tree</summary>
           <div class="details-body">
             <div class="cmd" data-title="Модель платы">
               <div class="cmd-head"><span>Прочитать model из Device Tree</span><button class="copy">Copy</button></div>
@@ -543,11 +631,17 @@ ssh andrey@10.129.1.152 'cat /home/andrey/bbb_ssh_transfer_test.txt'</code></pre
               <div class="cmd-head"><span>Посмотреть marker-файлы примененных overlays</span><button class="copy">Copy</button></div>
               <pre><code>find -L /proc/device-tree/chosen/overlays -maxdepth 1 -type f -print</code></pre>
             </div>
+
+            <div class="cmd" data-title="uEnv.txt">
+              <div class="cmd-head"><span>Просмотреть U-Boot/Linux boot configuration</span><button class="copy">Copy</button></div>
+              <pre><code>sed -n '1,220p' /boot/uEnv.txt</code></pre>
+              <p>Не изменять <code>/boot/uEnv.txt</code> без предварительного бэкапа.</p>
+            </div>
           </div>
         </details>
 
         <details open class="item">
-          <summary>ADC через IIO</summary>
+          <summary>6. ADC через IIO</summary>
           <div class="details-body">
             <div class="cmd" data-title="Найти IIO устройства">
               <div class="cmd-head"><span>Найти IIO devices и имя драйвера</span><button class="copy">Copy</button></div>
@@ -574,26 +668,134 @@ done</code></pre>
         </details>
 
         <details open class="item">
-          <summary>U-Boot</summary>
+          <summary>7. Host-target сеть, SSH и rsync</summary>
           <div class="details-body">
-            <div class="note">
-              Эти команды выполняются в U-Boot prompt <code>=&gt;</code>, а не в Linux shell.
-            </div>
-            <div class="cmd" data-title="U-Boot version">
-              <div class="cmd-head"><span>Версия U-Boot и toolchain</span><button class="copy">Copy</button></div>
-              <pre><code>version</code></pre>
-            </div>
-
-            <div class="cmd" data-title="U-Boot board info">
-              <div class="cmd-head"><span>RAM, relocation, MAC, FDT address</span><button class="copy">Copy</button></div>
-              <pre><code>bdinfo</code></pre>
+            <div class="cmd" data-title="BBB route helper">
+              <div class="cmd-head"><span>Проверить, применить или удалить временный route helper</span><button class="copy">Copy</button></div>
+              <pre><code>sh scripts/bbb-route.sh check
+sh scripts/bbb-route.sh apply
+sh scripts/bbb-route.sh delete</code></pre>
             </div>
 
-            <div class="cmd" data-title="MMC partitions">
-              <div class="cmd-head"><span>Список MMC устройств и разделов</span><button class="copy">Copy</button></div>
-              <pre><code>mmc list
-mmc dev 0
-mmc part</code></pre>
+            <div class="cmd" data-title="Проверить маршрут к BeagleBone">
+              <div class="cmd-head"><span>Проверить, не уводит ли VPN маршрут к плате</span><button class="copy">Copy</button></div>
+              <pre><code>ip route get 10.129.1.152</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Восстановить обход VPN">
+              <div class="cmd-head"><span>Добавить route до платы в VPN policy table 7113</span><button class="copy">Copy</button></div>
+              <pre><code>sudo ip route replace 10.129.1.152/32 dev eno0 src 10.129.1.110 table 7113</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Проверить SSH">
+              <div class="cmd-head"><span>Проверить SSH без интерактивной сессии</span><button class="copy">Copy</button></div>
+              <pre><code>ssh andrey@10.129.1.152 'hostname; uname -r; whoami'</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Интерактивный SSH">
+              <div class="cmd-head"><span>Войти на BeagleBone как в обычный shell</span><button class="copy">Copy</button></div>
+              <pre><code>ssh andrey@10.129.1.152</code></pre>
+              <p>После входа prompt должен стать похожим на <code>andrey@BeagleBone:~$</code>.</p>
+            </div>
+
+            <div class="cmd" data-title="Проверить SCP">
+              <div class="cmd-head"><span>Передать тестовый файл с хоста на плату</span><button class="copy">Copy</button></div>
+              <pre><code>printf 'bbb host to target transfer test\n' > /tmp/bbb_ssh_transfer_test.txt
+scp /tmp/bbb_ssh_transfer_test.txt andrey@10.129.1.152:/home/andrey/
+ssh andrey@10.129.1.152 'cat /home/andrey/bbb_ssh_transfer_test.txt'</code></pre>
+            </div>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>8. Kernel modules: подготовка исходников на хосте</summary>
+          <div class="details-body">
+            <div class="cmd" data-title="Создать каталог hello module">
+              <div class="cmd-head"><span>Создать структуру исходников первого модуля</span><button class="copy">Copy</button></div>
+              <pre><code>mkdir -p modules/hello</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Проверить hello.c">
+              <div class="cmd-head"><span>Показать исходник hello.c на хосте</span><button class="copy">Copy</button></div>
+              <pre><code>sed -n '1,120p' modules/hello/hello.c</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Проверить Makefile">
+              <div class="cmd-head"><span>Показать Makefile для Kbuild</span><button class="copy">Copy</button></div>
+              <pre><code>sed -n '1,40p' modules/hello/Makefile</code></pre>
+              <p>Ожидаем строку <code>obj-m += hello.o</code>.</p>
+            </div>
+
+            <div class="cmd" data-title="Передать hello module на BBB">
+              <div class="cmd-head"><span>Синхронизировать исходники перед сборкой</span><button class="copy">Copy</button></div>
+              <pre><code>rsync -av modules/hello/ andrey@10.129.1.152:/home/andrey/bbb-course/modules/hello/</code></pre>
+              <p><code>-a</code> включает archive mode, <code>-v</code> показывает передаваемые файлы, завершающий <code>/</code> у источника передает содержимое каталога.</p>
+            </div>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>9. Kernel modules: target-среда и Kbuild</summary>
+          <div class="details-body">
+            <div class="cmd" data-title="Проверить Kbuild build link">
+              <div class="cmd-head"><span>Проверить headers/build tree текущего ядра</span><button class="copy">Copy</button></div>
+              <pre><code>ls -ld /lib/modules/$(uname -r)/build
+readlink -f /lib/modules/$(uname -r)/build</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Проверить инструменты сборки">
+              <div class="cmd-head"><span>Проверить make, gcc и ld на BBB</span><button class="copy">Copy</button></div>
+              <pre><code>which make gcc ld
+make --version | head -n 1
+gcc --version | head -n 1
+ld --version | head -n 1</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Собрать hello module">
+              <div class="cmd-head"><span>Собрать внешний модуль через Kbuild</span><button class="copy">Copy</button></div>
+              <pre><code>cd ~/bbb-course/modules/hello
+make -C /lib/modules/$(uname -r)/build M=$PWD modules</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Показать артефакты сборки">
+              <div class="cmd-head"><span>Убедиться, что hello.ko создан</span><button class="copy">Copy</button></div>
+              <pre><code>ls -la</code></pre>
+            </div>
+          </div>
+        </details>
+
+        <details open class="item">
+          <summary>10. Kernel modules: metadata, загрузка и выгрузка</summary>
+          <div class="details-body">
+            <div class="cmd" data-title="Диагностика kmod и PATH">
+              <div class="cmd-head"><span>Проверить, где находятся утилиты управления модулями</span><button class="copy">Copy</button></div>
+              <pre><code>dpkg -l kmod
+which insmod rmmod lsmod modinfo
+ls -l /usr/sbin/modinfo /sbin/modinfo</code></pre>
+            </div>
+
+            <div class="cmd" data-title="modinfo hello.ko">
+              <div class="cmd-head"><span>Проверить metadata и vermagic модуля</span><button class="copy">Copy</button></div>
+              <pre><code>/usr/sbin/modinfo hello.ko</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Загрузить hello module">
+              <div class="cmd-head"><span>Загрузить hello.ko в ядро</span><button class="copy">Copy</button></div>
+              <pre><code>sudo /usr/sbin/insmod hello.ko
+dmesg | tail -n 20
+lsmod | grep hello</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Выгрузить hello module">
+              <div class="cmd-head"><span>Выгрузить модуль и проверить exit log</span><button class="copy">Copy</button></div>
+              <pre><code>sudo /usr/sbin/rmmod hello
+dmesg | tail -n 20
+lsmod | grep hello</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Kernel log через journalctl">
+              <div class="cmd-head"><span>Альтернативный просмотр kernel log</span><button class="copy">Copy</button></div>
+              <pre><code>journalctl -k -n 40</code></pre>
             </div>
           </div>
         </details>
@@ -621,16 +823,16 @@ mmc part</code></pre>
         <h2>Следующие шаги</h2>
         <ul class="concept-list">
           <li class="item">
-            <strong>Закрыть коммит документации</strong>
-            <span>Сейчас зафиксированы Device Tree/IIO, network/SSH и host-target workflow.</span>
+            <strong>Hello module completed</strong>
+            <span>Первый out-of-tree модуль собран на BBB, загружен через insmod, проверен через dmesg/lsmod и выгружен через rmmod.</span>
           </li>
           <li class="item">
-            <strong>Создать каталог модулей</strong>
-            <span>Например, <code>modules/hello</code> с первым out-of-tree kernel module.</span>
+            <strong>Добавить параметр модуля</strong>
+            <span>Следующий учебный шаг: <code>module_param</code>, <code>modinfo</code>, загрузка с параметром и проверка через <code>/sys/module</code>.</span>
           </li>
           <li class="item">
-            <strong>Hello World module</strong>
-            <span>Собрать под <code>6.12.76-bone50</code>, передать на плату, проверить <code>dmesg</code>.</span>
+            <strong>Расширить debugging workflow</strong>
+            <span>После параметров перейти к <code>pr_debug</code>, dynamic debug и более аккуратной диагностике.</span>
           </li>
         </ul>
       </section>
