@@ -38,7 +38,7 @@ Why this image:
 
 Single HTML entry point for browsing the learning base:
 
-- [Course index](index.html)
+- [Course index](docs/index.html)
 
 Core documents:
 
@@ -87,6 +87,9 @@ The final practical target is an educational analog input module:
 - First out-of-tree `hello` kernel module has been built on the BeagleBone
   Black, inspected with `modinfo`, loaded with `insmod`, verified through
   `dmesg`/`lsmod`, and unloaded with `rmmod`.
+- The `hello` module now has two tested parameters:
+  `username: charp, 0444` and `verbose: bool, 0644`; sysfs read/write behavior
+  and post-`rmmod` cleanup have been verified.
 
 Current host-target route:
 

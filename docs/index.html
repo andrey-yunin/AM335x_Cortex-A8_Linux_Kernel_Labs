@@ -333,8 +333,8 @@
         <h2>BeagleBone Black: Linux, Device Tree и драйверы</h2>
         <p>
           Эта страница собирает документы курса, ключевые выводы и проверенные
-          команды в одном месте. Ее можно открыть напрямую из корня репозитория:
-          <code>index.html</code>.
+          команды в одном месте. Файл лежит внутри репозитория:
+          <code>docs/index.html</code>.
         </p>
         <div class="search">
           <input id="search" type="search" placeholder="Поиск по index: ssh, u-boot, device tree, adc, iio, vpn, kernel...">
@@ -376,17 +376,17 @@
         <h2>Документы курса</h2>
         <div class="card-grid">
           <div class="card item">
-            <h3><a href="README.md">README</a></h3>
+            <h3><a href="../README.md">README</a></h3>
             <p>Карта курса, общий замысел и ссылки на основные документы.</p>
             <div class="tag-row"><span class="tag">entry</span><span class="tag">course map</span></div>
           </div>
           <div class="card item">
-            <h3><a href="REPORT.md">REPORT</a></h3>
+            <h3><a href="../REPORT.md">REPORT</a></h3>
             <p>Полный журнал работ: команды, результаты, выводы.</p>
             <div class="tag-row"><span class="tag">log</span><span class="tag">results</span></div>
           </div>
           <div class="card item">
-            <h3><a href="NEXT_SESSION.md">NEXT_SESSION</a></h3>
+            <h3><a href="../NEXT_SESSION.md">NEXT_SESSION</a></h3>
             <p>Краткий playbook для продолжения работы после паузы.</p>
             <div class="tag-row"><span class="tag">resume</span><span class="tag">checklist</span></div>
           </div>
@@ -397,27 +397,27 @@
           <div class="details-body">
             <ul class="doc-list">
               <li>
-                <strong><a href="course/01-boot-chain.md">01. Boot chain</a></strong>
+                <strong><a href="../course/01-boot-chain.md">01. Boot chain</a></strong>
                 <span>AM335x Boot ROM, SPL/MLO, U-Boot, kernel, Device Tree, rootfs.</span>
               </li>
               <li>
-                <strong><a href="course/02-prepare-sd.md">02. Подготовка microSD</a></strong>
+                <strong><a href="../course/02-prepare-sd.md">02. Подготовка microSD</a></strong>
                 <span>Выбор образа, checksum, XZ, запись образа на карту.</span>
               </li>
               <li>
-                <strong><a href="course/03-serial-console.md">03. Serial console</a></strong>
+                <strong><a href="../course/03-serial-console.md">03. Serial console</a></strong>
                 <span>UART-консоль, minicom, первая загрузка.</span>
               </li>
               <li>
-                <strong><a href="course/04-u-boot-environment.md">04. U-Boot environment</a></strong>
+                <strong><a href="../course/04-u-boot-environment.md">04. U-Boot environment</a></strong>
                 <span>Остановка autoboot, printenv, mmc, bootargs, загрузка kernel/DTB/initrd.</span>
               </li>
               <li>
-                <strong><a href="course/05-linux-device-tree.md">05. Linux Device Tree</a></strong>
+                <strong><a href="../course/05-linux-device-tree.md">05. Linux Device Tree</a></strong>
                 <span>Device Tree, overlays, driver matching, IIO ADC, userspace ABI.</span>
               </li>
               <li>
-                <strong><a href="course/06-host-target-network.md">06. Host-target network</a></strong>
+                <strong><a href="../course/06-host-target-network.md">06. Host-target network</a></strong>
                 <span>Ethernet, SSH, SCP/rsync, диагностика VPN route и обход через table 7113.</span>
               </li>
             </ul>
@@ -429,7 +429,7 @@
           <div class="details-body">
             <ul class="doc-list">
               <li>
-                <strong><a href="course/20-kernel-modules-roadmap.md">20. Roadmap: kernel modules and ADC</a></strong>
+                <strong><a href="../course/20-kernel-modules-roadmap.md">20. Roadmap: kernel modules and ADC</a></strong>
                 <span>Hello World module, встроенный ADC, внешний ADS1115, IIO и инженерные величины.</span>
               </li>
             </ul>
@@ -761,6 +761,12 @@ make -C /lib/modules/$(uname -r)/build M=$PWD modules</code></pre>
               <div class="cmd-head"><span>Убедиться, что hello.ko создан</span><button class="copy">Copy</button></div>
               <pre><code>ls -la</code></pre>
             </div>
+
+            <div class="cmd" data-title="Очистить Kbuild артефакты">
+              <div class="cmd-head"><span>Удалить .o/.ko/.cmd и другие результаты сборки</span><button class="copy">Copy</button></div>
+              <pre><code>make -C /lib/modules/$(uname -r)/build M=$PWD clean</code></pre>
+              <p>Команду выполняют из каталога модуля на BBB. Не запускать, если нужен готовый <code>hello.ko</code> для повторной проверки.</p>
+            </div>
           </div>
         </details>
 
@@ -780,17 +786,26 @@ ls -l /usr/sbin/modinfo /sbin/modinfo</code></pre>
             </div>
 
             <div class="cmd" data-title="Загрузить hello module">
-              <div class="cmd-head"><span>Загрузить hello.ko в ядро</span><button class="copy">Copy</button></div>
-              <pre><code>sudo /usr/sbin/insmod hello.ko
+              <div class="cmd-head"><span>Загрузить hello.ko с username и verbose</span><button class="copy">Copy</button></div>
+              <pre><code>sudo /usr/sbin/insmod hello.ko username=Yunin verbose=1
 dmesg | tail -n 20
-lsmod | grep hello</code></pre>
+cat /sys/module/hello/parameters/username
+cat /sys/module/hello/parameters/verbose
+ls -l /sys/module/hello/parameters/username /sys/module/hello/parameters/verbose</code></pre>
+            </div>
+
+            <div class="cmd" data-title="Изменить verbose runtime">
+              <div class="cmd-head"><span>Изменить writable bool-параметр через sysfs</span><button class="copy">Copy</button></div>
+              <pre><code>echo 0 | sudo tee /sys/module/hello/parameters/verbose
+cat /sys/module/hello/parameters/verbose</code></pre>
             </div>
 
             <div class="cmd" data-title="Выгрузить hello module">
               <div class="cmd-head"><span>Выгрузить модуль и проверить exit log</span><button class="copy">Copy</button></div>
               <pre><code>sudo /usr/sbin/rmmod hello
 dmesg | tail -n 20
-lsmod | grep hello</code></pre>
+lsmod | grep hello
+cat /sys/module/hello/parameters/username</code></pre>
             </div>
 
             <div class="cmd" data-title="Kernel log через journalctl">
@@ -824,15 +839,15 @@ lsmod | grep hello</code></pre>
         <ul class="concept-list">
           <li class="item">
             <strong>Hello module completed</strong>
-            <span>Первый out-of-tree модуль собран на BBB, загружен через insmod, проверен через dmesg/lsmod и выгружен через rmmod.</span>
+            <span>Первый out-of-tree модуль собран на BBB; <code>username</code> и <code>verbose</code> проверены через <code>modinfo</code>, <code>insmod</code>, <code>dmesg</code>, sysfs и <code>rmmod</code>.</span>
           </li>
           <li class="item">
-            <strong>Добавить параметр модуля</strong>
-            <span>Следующий учебный шаг: <code>module_param</code>, <code>modinfo</code>, загрузка с параметром и проверка через <code>/sys/module</code>.</span>
+            <strong>module_param_cb</strong>
+            <span>Следующий учебный шаг: custom set/get callbacks, реакция на запись через sysfs и валидация значения.</span>
           </li>
           <li class="item">
-            <strong>Расширить debugging workflow</strong>
-            <span>После параметров перейти к <code>pr_debug</code>, dynamic debug и более аккуратной диагностике.</span>
+            <strong>Дальше debugging</strong>
+            <span>После callback-параметра перейти к <code>pr_debug</code>, dynamic debug и более аккуратной диагностике.</span>
           </li>
         </ul>
       </section>

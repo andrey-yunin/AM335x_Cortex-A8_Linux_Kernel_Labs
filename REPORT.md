@@ -2961,7 +2961,7 @@ course/06-host-target-network.md
 Для удобной навигации по учебной базе добавлен статический файл:
 
 ```text
-index.html
+docs/index.html
 ```
 
 Назначение:
@@ -2973,7 +2973,7 @@ index.html
   `u-boot`, `kernel`;
 - открыть документацию в браузере без локального сервера.
 
-Структура `index.html`:
+Структура `docs/index.html`:
 
 ```text
 Текущее состояние
@@ -3238,7 +3238,7 @@ sed -n '1,120p' modules/hello/hello.c
 - последний аргумент - путь к файлу.
 
 Команды `mkdir -p` и `sed -n '1,120p'` добавлены в HTML-справочник
-`index.html` в раздел базовых shell-команд.
+`docs/index.html` в раздел базовых shell-команд.
 
 ### Начало разбора исходника hello kernel module
 
@@ -3783,7 +3783,7 @@ lsmod | grep hello
 Обновлен справочник команд в:
 
 ```text
-index.html
+docs/index.html
 ```
 
 Команды сначала были разнесены по темам текущей работы, затем порядок изменен
@@ -3817,6 +3817,726 @@ modules.
 - проверка `make`, `gcc`, `ld`;
 - сборка через Kbuild;
 - просмотр артефактов сборки;
+- очистка Kbuild-артефактов через `make ... clean`;
 - диагностика `kmod`, `PATH` и `modinfo`;
 - `insmod`, `dmesg`, `lsmod`, `rmmod`;
 - альтернативный просмотр kernel log через `journalctl -k`.
+
+### Теория следующего шага: параметры модуля
+
+После успешного `hello` module разобрана теория `module_param`.
+
+Ключевая идея:
+
+```text
+module parameter позволяет менять заранее предусмотренное поведение модуля без
+изменения исходника и без пересборки .ko
+```
+
+Пример:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Andrey
+sudo /usr/sbin/insmod hello.ko username=Test
+```
+
+Один и тот же `hello.ko` загружается с разными значениями параметра.
+
+Минимальная схема в коде:
+
+```c
+static char *username = "world";
+module_param(username, charp, 0444);
+MODULE_PARM_DESC(username, "Name to print in the hello message");
+```
+
+Разобрано:
+
+- параметр должен быть заранее описан в коде;
+- `charp` означает строковый параметр;
+- `0444` делает параметр read-only через sysfs;
+- `MODULE_PARM_DESC` добавляет описание в `modinfo`;
+- без `module_param(username, ...)` значение `username=...` при загрузке не
+  будет принято ядром.
+
+Реальные применения:
+
+- `debug=1` - включить подробные диагностические логи;
+- `poll_ms=1000` - задать интервал опроса;
+- `timeout_ms=500` - задать timeout;
+- `buffer_size=4096` - задать размер буфера, если драйвер поддерживает это
+  безопасно.
+
+Разобрана временность ручной загрузки:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Andrey
+```
+
+После reboot вручную загруженный модуль и его параметр не сохраняются.
+
+Для автозагрузки теоретически используется схема:
+
+```text
+/lib/modules/$(uname -r)/extra/hello.ko
+/etc/modules-load.d/hello.conf
+/etc/modprobe.d/hello.conf
+```
+
+и параметры:
+
+```text
+options hello username=Andrey
+```
+
+Разница:
+
+```text
+insmod
+  -> грузит конкретный .ko файл
+  -> не читает /etc/modprobe.d
+  -> не сохраняется после reboot
+
+modprobe
+  -> ищет модуль в /lib/modules/$(uname -r)/
+  -> учитывает зависимости
+  -> читает /etc/modprobe.d/*.conf
+  -> подходит для автозагрузки
+```
+
+Для текущего курса принято не включать автозагрузку, потому что это постоянное
+изменение target-системы.
+
+Отдельно разобраны права параметров:
+
+```c
+module_param(username, charp, 0444);
+module_param(debug, bool, 0644);
+```
+
+- `0444` - параметр можно читать через `/sys/module/.../parameters`, но нельзя
+  менять после загрузки;
+- `0644` - root может менять параметр через sysfs во время работы модуля.
+
+Разобран риск writable parameters:
+
+```text
+если параметр меняется из userspace в момент, когда драйвер активно использует
+его в ядре, возможны race condition, неконсистентное состояние, выход за пределы
+массива, use-after-free, деление на ноль, kernel oops или panic
+```
+
+Уточнена формулировка про `0644`.
+
+`0644` не делает параметр безопасным. Он только разрешает root запись в sysfs:
+
+```text
+0644 = политика доступа к sysfs-файлу
+валидация и безопасность = ответственность кода драйвера
+```
+
+Он не проверяет:
+
+```text
+валидное ли значение;
+безопасно ли менять его сейчас;
+не нужен ли lock;
+не идет ли параллельное чтение;
+не сломается ли структура данных;
+можно ли менять hardware mode на лету.
+```
+
+Корректная формулировка для будущего writable-параметра:
+
+```text
+verbose можно сделать writable не потому, что 0644 сам по себе безопасен,
+а потому что код использует verbose только как переключатель дополнительных
+логов
+```
+
+Если writable-параметр используется как индекс массива, размер буфера, режим
+железа или адрес устройства, безопасность должна обеспечиваться валидацией,
+синхронизацией и правильной логикой применения значения.
+
+### Практика writable-параметра verbose
+
+В `hello.c` добавлен второй параметр:
+
+```c
+static bool verbose;
+module_param(verbose, bool, 0644);
+MODULE_PARM_DESC(verbose, "Enable verbose hello module messages");
+```
+
+Итоговая модель параметров:
+
+```text
+username: charp, 0444
+verbose:  bool,  0644
+```
+
+После синхронизации на BeagleBone Black и пересборки:
+
+```sh
+make -C /lib/modules/$(uname -r)/build M=$PWD modules
+```
+
+`modinfo` показал:
+
+```text
+parm:           username:Name to print in the hello message (charp)
+parm:           verbose:Enable verbose hello module messages (bool)
+```
+
+Модуль загружен с двумя параметрами:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Yunin verbose=1
+```
+
+Проверка `dmesg`:
+
+```text
+[27365.184170] bbb_hello: init, username=Yunin
+[27365.189237] bbb_hello: verbose mode is enabled
+```
+
+Проверка sysfs:
+
+```sh
+cat /sys/module/hello/parameters/username
+cat /sys/module/hello/parameters/verbose
+ls -l /sys/module/hello/parameters/username /sys/module/hello/parameters/verbose
+```
+
+Результат:
+
+```text
+Yunin
+Y
+-r--r--r-- 1 root root 4096 Apr 28 16:52 /sys/module/hello/parameters/username
+-rw-r--r-- 1 root root 4096 Apr 28 16:52 /sys/module/hello/parameters/verbose
+```
+
+Вывод:
+
+- `username` остался read-only параметром;
+- `verbose` стал writable параметром для root;
+- bool-параметры в sysfs отображаются как `Y` / `N`.
+
+Runtime-изменение:
+
+```sh
+echo 0 | sudo tee /sys/module/hello/parameters/verbose
+cat /sys/module/hello/parameters/verbose
+```
+
+Результат:
+
+```text
+0
+N
+```
+
+При проверке `dmesg` после записи нового значения сразу не появилось новой
+строки. Это ожидаемо: обычный `module_param` меняет переменную, но не вызывает
+пользовательский callback в момент записи.
+
+Код читает `verbose` только в `init` и `exit`. После изменения `verbose` с `Y`
+на `N` при выгрузке:
+
+```sh
+sudo /usr/sbin/rmmod hello
+```
+
+в `dmesg` появилась строка:
+
+```text
+[27861.472041] bbb_hello: exit, username=Yunin
+```
+
+и не появилась строка:
+
+```text
+bbb_hello: verbose mode was enabled
+```
+
+Вывод: runtime-запись в sysfs изменила переменную `verbose`, но эффект виден
+только в том месте кода, где модуль потом прочитал эту переменную.
+
+Отдельно зафиксирован следующий механизм для будущего изучения:
+
+```text
+module_param_cb
+```
+
+Он нужен, если драйвер должен выполнить custom callback прямо в момент записи
+нового значения параметра через sysfs.
+
+Вывод для следующей практики:
+
+```text
+username: charp, 0444
+```
+
+Это безопасный read-only параметр: задается при `insmod`, читается через sysfs,
+но не меняется во время работы. Writable параметр `debug: bool, 0644` лучше
+разобрать позже отдельным шагом.
+
+### Sysfs как точка доступа к параметру модуля
+
+После добавления:
+
+```c
+static char *username = "world";
+module_param(username, charp, 0444);
+MODULE_PARM_DESC(username, "Name to print in the hello message");
+```
+
+собранный модуль показывает параметр в `modinfo`:
+
+```text
+parm: username:Name to print in the hello message (charp)
+```
+
+Разобрано, что после загрузки:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Yunin
+```
+
+ядро создает sysfs-представление параметра:
+
+```text
+/sys/module/hello/parameters/username
+```
+
+Практическая модель:
+
+```text
+/sys/module/hello/parameters/username
+  -> точка доступа к параметру username загруженного модуля hello
+```
+
+Значение `Yunin` хранится не в обычном файле на microSD/eMMC, а в RAM ядра, в
+переменной загруженного модуля. `sysfs` дает контролируемый файловый интерфейс
+к этому значению.
+
+При чтении:
+
+```sh
+cat /sys/module/hello/parameters/username
+```
+
+userspace-программа `cat` обращается к sysfs, а ядро возвращает текущее значение
+параметра как текст:
+
+```text
+Yunin
+```
+
+Важно: этот путь не является адресом RAM и не дает прямой доступ к памяти ядра.
+Это именованная точка доступа, которую ядро связывает с параметром модуля.
+
+Проверка прав:
+
+```sh
+ls -l /sys/module/hello/parameters/username
+```
+
+Результат:
+
+```text
+-r--r--r-- 1 root root 4096 Apr 28 14:21 /sys/module/hello/parameters/username
+```
+
+Это соответствует `0444`: читать можно, писать нельзя.
+
+Попытка записи:
+
+```sh
+echo Test | sudo tee /sys/module/hello/parameters/username
+```
+
+Результат:
+
+```text
+tee: /sys/module/hello/parameters/username: Permission denied
+Test
+```
+
+`Permission denied` подтверждает read-only режим. Строка `Test` дополнительно
+появилась в терминале потому, что `tee` дублирует входные данные в stdout даже
+при ошибке записи в файл.
+
+Повторное чтение:
+
+```sh
+cat /sys/module/hello/parameters/username
+```
+
+Результат:
+
+```text
+Yunin
+```
+
+Вывод: параметр был задан при `insmod`, доступен для чтения через sysfs, но не
+изменяется во время работы из-за прав `0444`.
+
+### Минимальная модель памяти для kernel module
+
+В ходе обсуждения параметра `username` разобрана базовая модель памяти
+загружаемого модуля.
+
+Главная формулировка:
+
+```text
+модуль .ko размещается в RAM ядра, но код ядра работает с kernel virtual
+addresses, а не напрямую с физическими адресами RAM
+```
+
+При загрузке:
+
+```sh
+sudo /usr/sbin/insmod hello.ko
+```
+
+ядро разбирает ELF-файл модуля и размещает его секции:
+
+```text
+.text      -> машинный код функций
+.rodata    -> read-only данные и строковые литералы
+.data      -> инициализированные global/static переменные
+.bss       -> неинициализированные global/static переменные
+.init.text -> код инициализации
+.exit.text -> код выгрузки
+```
+
+Модуль не является одной простой непрерывной C-структурой. Он ближе к набору
+ELF-секций, которые kernel module loader размещает в kernel virtual address
+space, выравнивает, настраивает права доступа и исправляет relocations.
+
+Аналогия с массивом/структурой частично полезна:
+
+```text
+внутри секции есть base address + offset
+конкретная функция или переменная имеет адрес
+```
+
+Но точнее:
+
+```text
+kernel module = ELF-секции, размещенные в kernel virtual address space
+```
+
+Для нашего кода:
+
+```c
+static char *username = "world";
+```
+
+- переменная `username` имеет адрес в данных модуля;
+- строковый литерал `"world"` обычно лежит в read-only данных;
+- `bbb_hello_init()` имеет адрес в кодовой/init-секции;
+- `bbb_hello_exit()` имеет адрес в exit-секции.
+
+Все эти адреса являются kernel virtual addresses.
+
+Разобрана роль MMU:
+
+```text
+software / CPU instruction
+        |
+        v
+virtual address
+        |
+        v
+MMU + page tables
+        |
+        v
+physical address
+        |
+        v
+RAM or device registers
+```
+
+Ключевой вывод:
+
+```text
+software обычно работает с virtual addresses
+MMU переводит virtual -> physical
+hardware видит physical addresses
+```
+
+При этом physical address может указывать не только на RAM:
+
+```text
+physical RAM addresses
+  -> реальные ячейки оперативной памяти
+
+physical MMIO addresses
+  -> регистры периферийных устройств
+```
+
+Устройства SoC обычно имеют свои physical address ranges в общей physical
+address map, а не "подключаются к RAM-адресам".
+
+Для RAM:
+
+```text
+kernel virtual address -> physical RAM
+```
+
+Для устройства:
+
+```text
+kernel virtual address -> physical MMIO registers
+```
+
+Связь с будущими драйверами:
+
+```text
+Device Tree reg
+  -> physical MMIO address
+  -> ioremap / devm_ioremap_resource
+  -> kernel virtual address
+  -> readl / writel
+```
+
+Для текущего модуля:
+
+```text
+hello.ko загружен
+  -> код и данные размещены в kernel virtual address space
+  -> MMU связывает virtual addresses с physical RAM
+  -> username существует как переменная загруженного модуля
+  -> /sys/module/hello/parameters/username дает точку доступа к значению
+```
+
+После выгрузки:
+
+```sh
+sudo /usr/sbin/rmmod hello
+```
+
+ядро удаляет sysfs-представление и освобождает память, занятую кодом, данными и
+служебными структурами модуля.
+
+Практический вывод:
+
+```text
+нет модуля в ядре
+  -> нет активной переменной username
+  -> нет /sys/module/hello/parameters/username
+```
+
+### Точка доступа к ресурсу ядра
+
+Сформулировано общее правило доступа userspace к ресурсам ядра.
+
+Короткая версия:
+
+```text
+если ядро специально открыло ресурс через интерфейс,
+то со стороны userspace достаточно знать точку доступа и иметь права
+```
+
+Для нашего примера:
+
+```text
+ресурс ядра: параметр username модуля hello
+точка доступа: /sys/module/hello/parameters/username
+права: -r--r--r--
+действие: cat /sys/module/hello/parameters/username
+```
+
+Команда чтения работает потому, что:
+
+- модуль `hello` загружен;
+- параметр `username` зарегистрирован через `module_param`;
+- ядро создало sysfs-точку доступа;
+- права `0444` разрешают чтение.
+
+Запись через:
+
+```sh
+echo Test | sudo tee /sys/module/hello/parameters/username
+```
+
+не работает, потому что права `0444` не разрешают write-доступ.
+
+Разобрано важное ограничение:
+
+```text
+userspace не может обращаться к любому ресурсу ядра просто по адресу
+```
+
+Нужен официальный интерфейс, например:
+
+```text
+/sys
+/proc
+/dev
+debugfs
+ioctl
+netlink
+syscall
+```
+
+Вывод:
+
+```text
+userspace работает не с адресами объектов ядра,
+а с точками доступа, которые ядро специально предоставляет и защищает правами
+```
+
+Добавлен краткий справочник по этим интерфейсам:
+
+```text
+/sys
+  Sysfs: устройства, шины, драйверы, классы устройств, модули и параметры.
+  Примеры:
+    /sys/module/hello/parameters/username
+    /sys/bus/iio/devices/iio:device0/in_voltage0_raw
+
+/proc
+  Procfs: процессы и runtime-информация ядра.
+  Примеры:
+    /proc/cmdline
+    /proc/device-tree
+
+/dev
+  Device files: character/block devices для read/write/mmap/ioctl.
+  Примеры:
+    /dev/ttyUSB0
+    /dev/mmcblk0
+
+debugfs
+  Отладочная файловая система ядра, обычно /sys/kernel/debug.
+  Не считается стабильным userspace ABI.
+
+ioctl
+  Управляющие команды к драйверу через открытый file descriptor.
+
+netlink
+  Обмен сообщениями между kernel и userspace через socket API.
+
+syscall
+  Базовый контролируемый вход userspace в ядро: open/read/write/ioctl/socket.
+```
+
+Общий смысл:
+
+```text
+ядро не отдает userspace прямой адрес объекта,
+а предоставляет контролируемую операцию через выбранный интерфейс
+```
+
+### Завершение сессии 2026-04-28
+
+Сессия завершена после проверки второго параметра модуля:
+
+```text
+username: charp, 0444
+verbose:  bool,  0644
+```
+
+Практически проверено:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Yunin verbose=1
+dmesg | tail -n 20
+cat /sys/module/hello/parameters/username
+cat /sys/module/hello/parameters/verbose
+ls -l /sys/module/hello/parameters/username /sys/module/hello/parameters/verbose
+echo 0 | sudo tee /sys/module/hello/parameters/verbose
+cat /sys/module/hello/parameters/verbose
+sudo /usr/sbin/rmmod hello
+dmesg | tail -n 20
+cat /sys/module/hello/parameters/username
+```
+
+Ключевые результаты:
+
+```text
+bbb_hello: init, username=Yunin
+bbb_hello: verbose mode is enabled
+username -> Yunin
+verbose  -> Y
+username permissions -> -r--r--r--
+verbose permissions  -> -rw-r--r--
+echo 0 -> verbose becomes N
+bbb_hello: exit, username=Yunin
+after rmmod -> /sys/module/hello/parameters/username does not exist
+```
+
+Важный вывод:
+
+```text
+обычный module_param меняет связанную переменную,
+но не вызывает пользовательский обработчик в момент записи через sysfs
+```
+
+Эффект изменения `verbose` стал виден только при следующем чтении переменной в
+коде модуля, то есть в `bbb_hello_exit()`.
+
+Следующий учебный шаг:
+
+```text
+module_param_cb
+```
+
+Цель следующей сессии:
+
+- разобрать custom set/get callbacks;
+- показать, как выполнить код именно в момент записи параметра через sysfs;
+- добавить валидацию значения;
+- сравнить `module_param` и `module_param_cb`;
+- сохранить прежний host -> rsync -> BBB -> Kbuild -> insmod/rmmod workflow.
+
+Для быстрого входа в следующую сессию обновлен:
+
+```text
+NEXT_SESSION.md
+```
+
+### Перенос HTML-справочника в docs
+
+Статическая HTML-точка входа перенесена:
+
+```text
+index.html -> docs/index.html
+```
+
+Причина: файл `index.html` в корне репозитория мешал GitHub корректно
+воспринимать проект как в первую очередь документацию/код для embedded Linux и
+модулей ядра, а не как HTML-проект.
+
+Обновлены ссылки:
+
+```text
+README.md
+NEXT_SESSION.md
+docs/index.html
+REPORT.md
+```
+
+Внутренние ссылки из `docs/index.html` к `README.md`, `REPORT.md`,
+`NEXT_SESSION.md` и файлам `course/` скорректированы на относительные пути
+через `../`.
+
+Дополнительно добавлен файл:
+
+```text
+.gitattributes
+```
+
+Содержимое:
+
+```text
+docs/index.html linguist-documentation
+```
+
+Это подсказывает GitHub Linguist считать HTML-справочник документацией, чтобы он
+не перетягивал языковую статистику репозитория в сторону HTML.

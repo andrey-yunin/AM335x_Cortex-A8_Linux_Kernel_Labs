@@ -501,6 +501,798 @@ bbb_hello: exit
 
 После выгрузки `lsmod | grep hello` не должен выводить строку с модулем.
 
+### Следующий шаг: параметры модуля
+
+После минимального `hello` module следующий учебный шаг - добавить параметр
+модуля через `module_param`.
+
+Главная идея: параметр позволяет менять заранее предусмотренное поведение
+модуля без изменения исходника и без пересборки `.ko`.
+
+Один и тот же файл:
+
+```text
+hello.ko
+```
+
+можно загрузить с разными значениями:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Andrey
+sudo /usr/sbin/insmod hello.ko username=Test
+sudo /usr/sbin/insmod hello.ko username=BBB
+```
+
+Но передать можно только те параметры, которые заранее описаны в коде. Если в
+модуле нет `module_param(username, ...)`, параметр `username=...` ядро не
+примет.
+
+Минимальная схема в коде:
+
+```c
+static char *username = "world";
+module_param(username, charp, 0444);
+MODULE_PARM_DESC(username, "Name to print in the hello message");
+```
+
+Разбор:
+
+- `username` - переменная и имя параметра;
+- `charp` - строковый параметр;
+- `0444` - права sysfs: read-only для owner/group/others;
+- `MODULE_PARM_DESC` добавляет описание параметра в `modinfo`.
+
+Проверка после сборки:
+
+```sh
+/usr/sbin/modinfo hello.ko
+```
+
+Ожидаемый признак:
+
+```text
+parm: username:Name to print in the hello message (charp)
+```
+
+Временная ручная загрузка:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Andrey
+```
+
+Проверка:
+
+```sh
+dmesg | tail -n 20
+cat /sys/module/hello/parameters/username
+```
+
+#### Реальные применения module parameters
+
+Практические примеры:
+
+- `debug=1` - включить подробные диагностические логи;
+- `poll_ms=1000` - задать интервал опроса;
+- `timeout_ms=500` - задать timeout операции;
+- `buffer_size=4096` - выбрать размер буфера, если драйвер это безопасно
+  поддерживает.
+
+Например:
+
+```c
+static bool debug;
+module_param(debug, bool, 0644);
+MODULE_PARM_DESC(debug, "Enable verbose debug logs");
+```
+
+Загрузка:
+
+```sh
+sudo /usr/sbin/insmod industrial_adc.ko debug=1
+```
+
+В коде:
+
+```c
+if (debug)
+    pr_info("adc: ch=%u raw=%d scale=%d\n", channel, raw, scale);
+```
+
+Так один и тот же `.ko` может работать в обычном тихом режиме или в
+диагностическом режиме.
+
+#### Что происходит после reboot
+
+Если модуль загружен вручную:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Andrey
+```
+
+после перезагрузки Linux этот модуль и его параметр не сохранятся. `insmod`
+загружает модуль только в текущее работающее ядро.
+
+Для автозагрузки используется другой механизм:
+
+```text
+/lib/modules/$(uname -r)/extra/hello.ko
+/etc/modules-load.d/hello.conf
+/etc/modprobe.d/hello.conf
+```
+
+Типовая схема:
+
+```sh
+sudo mkdir -p /lib/modules/$(uname -r)/extra
+sudo cp hello.ko /lib/modules/$(uname -r)/extra/
+sudo depmod
+```
+
+Файл автозагрузки:
+
+```text
+/etc/modules-load.d/hello.conf
+```
+
+Содержимое:
+
+```text
+hello
+```
+
+Файл параметров:
+
+```text
+/etc/modprobe.d/hello.conf
+```
+
+Содержимое:
+
+```text
+options hello username=Andrey
+```
+
+После reboot система может загрузить модуль через `modprobe hello`, применив
+параметры из `modprobe.d`.
+
+Разница:
+
+```text
+insmod ./hello.ko username=Andrey
+  -> грузит конкретный файл
+  -> не ищет зависимости
+  -> не читает /etc/modprobe.d
+  -> не сохраняется после reboot
+
+modprobe hello
+  -> ищет модуль в /lib/modules/$(uname -r)/
+  -> учитывает зависимости
+  -> читает /etc/modprobe.d/*.conf
+  -> подходит для автозагрузки
+```
+
+Для текущего курса автозагрузку пока не включаем, потому что это постоянное
+изменение target-системы. На лабораторном этапе безопаснее вручную загружать и
+выгружать модуль.
+
+#### Read-only и writable параметры
+
+Права в `module_param` определяют, будет ли параметр доступен через sysfs:
+
+```c
+module_param(username, charp, 0444);
+```
+
+`0444` означает read-only:
+
+```sh
+cat /sys/module/hello/parameters/username
+```
+
+но запись после загрузки запрещена.
+
+Writable пример:
+
+```c
+module_param(debug, bool, 0644);
+```
+
+Такой параметр можно изменить во время работы:
+
+```sh
+cat /sys/module/hello/parameters/debug
+echo 1 | sudo tee /sys/module/hello/parameters/debug
+```
+
+Модель:
+
+```text
+modprobe.d задает значение при загрузке
+sysfs может менять значение после загрузки, если права позволяют
+```
+
+#### Риски runtime-изменения параметров
+
+`0644` сам по себе не делает параметр безопасным. Он только отвечает на вопрос:
+
+```text
+может ли root записать новое значение в sysfs-файл параметра?
+```
+
+Он не проверяет:
+
+```text
+валидное ли значение;
+безопасно ли менять его сейчас;
+не идет ли параллельное чтение;
+не нужен ли lock;
+не сломает ли значение внутреннюю структуру данных;
+можно ли менять hardware mode на лету.
+```
+
+Writable parameters могут привести к ошибкам ядра, если драйвер не защищает
+доступ и не валидирует значения. Параметр становится общей переменной между
+кодом ядра и записью из userspace через sysfs.
+
+Возможные проблемы:
+
+- race condition;
+- неконсистентное состояние;
+- выход за пределы массива;
+- use-after-free;
+- деление на ноль;
+- невалидный hardware режим;
+- kernel oops или panic.
+
+Пример опасного параметра:
+
+```c
+static int channel = 0;
+module_param(channel, int, 0644);
+```
+
+Если код делает:
+
+```c
+value = adc_channels[channel].last_value;
+```
+
+а userspace запишет:
+
+```sh
+echo 999 | sudo tee /sys/module/driver/parameters/channel
+```
+
+без проверки диапазона возможен выход за пределы массива.
+
+Поэтому в реальном коде:
+
+- опасные параметры делают read-only: `0444`;
+- writable параметры валидируют;
+- доступ защищают lock-ами;
+- для сложных случаев используют `module_param_cb`;
+- для runtime-настроек часто создают отдельный sysfs/configfs/ioctl/netlink
+  интерфейс с проверками;
+- hardware-конфигурацию часто задают через Device Tree и не меняют на лету.
+
+Для нашего следующего шага безопасный выбор:
+
+```text
+username: charp, 0444
+```
+
+То есть параметр задается при `insmod`, читается через sysfs, но не меняется во
+время работы модуля. Позже можно отдельно показать безопасный writable параметр
+`debug: bool, 0644`.
+
+Более точная формулировка для будущего writable-параметра:
+
+```text
+verbose можно сделать writable не потому, что 0644 сам по себе безопасен,
+а потому что код использует verbose только как переключатель дополнительных
+логов
+```
+
+Например:
+
+```c
+if (verbose)
+    pr_info("extra log\n");
+```
+
+В таком варианте изменение `verbose` влияет только на печать дополнительного
+сообщения. Если writable-параметр используется как индекс массива, размер
+буфера, режим железа или адрес устройства, безопасность должна обеспечиваться
+дополнительной логикой драйвера.
+
+#### Writable verbose parameter
+
+После read-only параметра `username` добавлен второй параметр:
+
+```c
+static bool verbose;
+module_param(verbose, bool, 0644);
+MODULE_PARM_DESC(verbose, "Enable verbose hello module messages");
+```
+
+Теперь модуль имеет два параметра:
+
+```text
+username: charp, 0444
+verbose:  bool,  0644
+```
+
+`username` задается при загрузке и доступен только для чтения через sysfs.
+`verbose` можно задать при загрузке и изменить во время работы модуля через
+sysfs.
+
+Пример загрузки:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Yunin verbose=1
+```
+
+Проверка `modinfo`:
+
+```text
+parm: username:Name to print in the hello message (charp)
+parm: verbose:Enable verbose hello module messages (bool)
+```
+
+Проверка `dmesg`:
+
+```text
+bbb_hello: init, username=Yunin
+bbb_hello: verbose mode is enabled
+```
+
+Проверка sysfs:
+
+```sh
+cat /sys/module/hello/parameters/username
+cat /sys/module/hello/parameters/verbose
+ls -l /sys/module/hello/parameters/username /sys/module/hello/parameters/verbose
+```
+
+Результат:
+
+```text
+Yunin
+Y
+-r--r--r-- ... /sys/module/hello/parameters/username
+-rw-r--r-- ... /sys/module/hello/parameters/verbose
+```
+
+Для bool-параметра ядро показывает `Y` / `N`, а не обязательно `1` / `0`.
+
+Изменение runtime-параметра:
+
+```sh
+echo 0 | sudo tee /sys/module/hello/parameters/verbose
+cat /sys/module/hello/parameters/verbose
+```
+
+Результат:
+
+```text
+0
+N
+```
+
+`tee` печатает `0` в stdout, а `cat` показывает, что ядро приняло новое значение
+как `N`.
+
+Важный вывод: обычный `module_param` меняет связанную переменную, но не вызывает
+пользовательскую функцию в момент записи. Поэтому после:
+
+```sh
+echo 0 | sudo tee /sys/module/hello/parameters/verbose
+```
+
+новая строка в `dmesg` не появляется автоматически. Наш код читает `verbose`
+только в `init` и `exit`:
+
+```c
+if (verbose)
+    pr_info("bbb_hello: verbose mode is enabled\n");
+```
+
+и:
+
+```c
+if (verbose)
+    pr_info("bbb_hello: verbose mode was enabled\n");
+```
+
+После изменения `verbose` с `Y` на `N` при выгрузке появилось:
+
+```text
+bbb_hello: exit, username=Yunin
+```
+
+и не появилось:
+
+```text
+bbb_hello: verbose mode was enabled
+```
+
+Это подтверждает, что переменная изменилась, но эффект виден только там, где код
+модуля затем прочитал эту переменную.
+
+Если нужна реакция именно в момент записи нового значения в sysfs, используется
+другой механизм:
+
+```text
+module_param_cb
+```
+
+Callback-параметр позволяет задать custom set/get callbacks, которые будут
+вызваны при записи или чтении параметра. Это следующий уровень после обычного
+`module_param`.
+
+#### Sysfs-представление параметра
+
+После загрузки модуля:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Yunin
+```
+
+ядро создает sysfs-представление модуля:
+
+```text
+/sys/module/hello/
+```
+
+Если в модуле есть параметр:
+
+```c
+module_param(username, charp, 0444);
+```
+
+то появляется точка доступа:
+
+```text
+/sys/module/hello/parameters/username
+```
+
+Рабочая модель для курса:
+
+```text
+/sys/module/hello/parameters/username
+  -> точка доступа к параметру username загруженного модуля hello
+```
+
+При чтении:
+
+```sh
+cat /sys/module/hello/parameters/username
+```
+
+пользователь получает текущее значение параметра:
+
+```text
+Yunin
+```
+
+Технически значение хранится не как обычный файл на microSD/eMMC. Значение
+находится в RAM ядра, в переменной модуля:
+
+```c
+static char *username;
+```
+
+`sysfs` дает контролируемый файловый интерфейс к этому значению. Команда `cat`
+работает как userspace-программа: она вызывает обычное чтение файла, а ядро
+через sysfs возвращает текущее значение параметра как текст.
+
+Важно:
+
+```text
+/sys/module/hello/parameters/username
+```
+
+не является адресом RAM и не дает userspace прямой доступ к памяти ядра. Это
+именованная точка доступа, которую ядро связывает с параметром модуля.
+
+Права `0444` видны как:
+
+```text
+-r--r--r--
+```
+
+Поэтому чтение разрешено:
+
+```sh
+cat /sys/module/hello/parameters/username
+```
+
+а запись запрещена:
+
+```sh
+echo Test | sudo tee /sys/module/hello/parameters/username
+```
+
+ожидаемо возвращает `Permission denied`.
+
+После выгрузки:
+
+```sh
+sudo /usr/sbin/rmmod hello
+```
+
+модуль исчезает из ядра, и его sysfs-представление:
+
+```text
+/sys/module/hello/
+```
+
+тоже исчезает.
+
+#### Минимальная модель памяти для kernel module
+
+Загружаемый модуль `.ko` размещается в RAM ядра, но код ядра обычно работает не
+с физическими адресами напрямую, а с kernel virtual addresses.
+
+При загрузке:
+
+```sh
+sudo /usr/sbin/insmod hello.ko
+```
+
+ядро разбирает ELF-файл модуля и размещает его секции в памяти:
+
+```text
+.text      -> машинный код функций
+.rodata    -> read-only данные и строковые литералы
+.data      -> инициализированные global/static переменные
+.bss       -> неинициализированные global/static переменные
+.init.text -> код инициализации
+.exit.text -> код выгрузки
+```
+
+Это не один простой массив байтов. Модуль - набор секций, которые loader ядра
+размещает в kernel virtual address space, выравнивает, настраивает права и
+исправляет relocations.
+
+Полезная аналогия: внутри каждой размещенной секции адресация похожа на:
+
+```text
+base address + offset
+```
+
+Но весь модуль точнее понимать как набор ELF-секций, а не как одну C-структуру.
+
+Примеры:
+
+```c
+static char *username = "world";
+```
+
+- сама переменная `username` имеет адрес в данных модуля;
+- строковый литерал `"world"` обычно лежит в read-only данных;
+- функция `bbb_hello_init()` имеет адрес в кодовой секции;
+- функция `bbb_hello_exit()` имеет адрес в exit-секции.
+
+Все эти адреса для кода ядра - kernel virtual addresses.
+
+Минимальная модель:
+
+```text
+software / CPU instruction
+        |
+        v
+virtual address
+        |
+        v
+MMU + page tables
+        |
+        v
+physical address
+        |
+        v
+RAM or device registers
+```
+
+Основная идея виртуальной памяти:
+
+```text
+software работает с virtual addresses,
+MMU переводит их в physical addresses,
+hardware видит physical addresses.
+```
+
+Зачем это нужно:
+
+- изоляция userspace-процессов друг от друга;
+- защита kernel memory от обычных программ;
+- возможность давать коду непрерывный virtual range поверх разных физических
+  страниц RAM;
+- права доступа на уровне страниц: read-only, executable, no-execute,
+  kernel-only;
+- отображение регистров устройств в адресное пространство ядра;
+- управляемая загрузка и выгрузка модулей.
+
+Важно различать physical address ranges:
+
+```text
+physical RAM addresses
+  -> реальные ячейки оперативной памяти
+
+physical MMIO addresses
+  -> регистры периферии: GPIO, UART, I2C, ADC и т.п.
+```
+
+Устройства обычно не "подключаются к RAM-адресам". У SoC есть physical address
+map, где одни диапазоны ведут к RAM, а другие - к регистрам устройств.
+
+Для RAM:
+
+```text
+kernel virtual address -> physical RAM
+```
+
+Для устройства:
+
+```text
+kernel virtual address -> physical MMIO registers
+```
+
+Драйверы обычно получают physical MMIO address из Device Tree property `reg`, а
+затем отображают его в kernel virtual address через `ioremap` /
+`devm_ioremap_resource`. После этого код драйвера читает и пишет регистры через
+kernel virtual address, например с помощью `readl()` / `writel()`.
+
+Для нашего `hello` module:
+
+```text
+hello.ko загружен
+  -> код и данные размещены в kernel virtual address space
+  -> MMU связывает эти virtual addresses с physical RAM
+  -> username существует как переменная загруженного модуля
+  -> /sys/module/hello/parameters/username дает точку доступа к значению
+```
+
+После:
+
+```sh
+sudo /usr/sbin/rmmod hello
+```
+
+ядро:
+
+- вызывает exit-функцию;
+- удаляет sysfs-представление `/sys/module/hello/`;
+- освобождает память, занятую кодом, данными и служебными структурами модуля;
+- удаляет active kernel objects, связанные с этим модулем.
+
+Практический вывод:
+
+```text
+нет модуля в ядре
+  -> нет активной переменной username
+  -> нет /sys/module/hello/parameters/username
+```
+
+#### Точка доступа к ресурсу ядра
+
+Userspace не обращается к произвольной памяти ядра напрямую. Даже если у
+переменной или структуры ядра есть адрес, обычная программа не может безопасно
+читать или писать этот адрес.
+
+Доступ возможен, если ядро явно открыло ресурс через интерфейс и права доступа
+разрешают нужное действие.
+
+Формула:
+
+```text
+ресурс ядра доступен userspace,
+если ядро создало для него точку доступа
+и права разрешают чтение или запись
+```
+
+Для нашего примера:
+
+```text
+ресурс ядра: параметр username модуля hello
+точка доступа: /sys/module/hello/parameters/username
+права: -r--r--r--
+действие: чтение через cat
+```
+
+Команда:
+
+```sh
+cat /sys/module/hello/parameters/username
+```
+
+работает потому, что:
+
+- модуль `hello` загружен;
+- параметр `username` зарегистрирован через `module_param`;
+- ядро создало sysfs-точку доступа;
+- права `0444` разрешают чтение.
+
+Запись:
+
+```sh
+echo Test | sudo tee /sys/module/hello/parameters/username
+```
+
+не работает, потому что права `0444` не дают write-доступ.
+
+Типовые интерфейсы, через которые ядро открывает ресурсы userspace:
+
+```text
+/sys      sysfs: устройства, драйверы, модули, параметры
+/proc     procfs: процессы и часть runtime-информации ядра
+/dev      device files: character/block devices
+debugfs   отладочные интерфейсы ядра
+ioctl     команды управления через file descriptor
+netlink   обмен сообщениями kernel <-> userspace
+syscall   системные вызовы
+```
+
+Главный вывод:
+
+```text
+userspace работает не с адресами объектов ядра,
+а с точками доступа, которые ядро специально предоставляет.
+```
+
+Краткий справочник по интерфейсам:
+
+```text
+/sys
+  Sysfs. Представляет kernel objects как дерево файлов и каталогов:
+  устройства, шины, драйверы, классы устройств, модули, параметры.
+  Примеры из курса:
+    /sys/module/hello/parameters/username
+    /sys/bus/iio/devices/iio:device0/in_voltage0_raw
+
+/proc
+  Procfs. Исторически содержит информацию о процессах и runtime-состоянии
+  ядра. Часть файлов относится к процессам, часть - к системе в целом.
+  Примеры из курса:
+    /proc/cmdline
+    /proc/device-tree
+
+/dev
+  Device files. Точки доступа к character/block devices. Через них userspace
+  обычно делает read/write/mmap/ioctl к драйверу устройства.
+  Примеры:
+    /dev/ttyUSB0
+    /dev/mmcblk0
+
+debugfs
+  Отладочная файловая система ядра. Удобна для диагностики, tracing и
+  dynamic debug, но не считается стабильным userspace ABI.
+  Обычно монтируется в:
+    /sys/kernel/debug
+
+ioctl
+  Управляющие команды к драйверу через уже открытый file descriptor.
+  Используется, когда простых read/write недостаточно.
+  Типовая форма:
+    ioctl(fd, COMMAND, arg)
+
+netlink
+  Канал обмена сообщениями между kernel и userspace через socket API.
+  Часто используется для сетевой подсистемы, routing, udev-событий и
+  конфигурационных сообщений.
+
+syscall
+  Системный вызов - базовый контролируемый вход userspace в ядро.
+  Любые open/read/write/ioctl/socket в итоге проходят через syscalls.
+```
+
+Эти интерфейсы отличаются формой, но общая идея одна:
+
+```text
+ядро не отдает userspace прямой адрес своего объекта,
+а предоставляет контролируемую операцию через выбранный интерфейс.
+```
+
 ## 2. Этап встроенного ADC AM335x
 
 У BeagleBone Black есть встроенный ADC в SoC AM335x. Для него уже существует
