@@ -1,4 +1,4 @@
-# План второй части: модули ядра и ADC
+# План второй части: модули ядра, UART и ADC
 
 Эта часть курса начинается после того, как BeagleBone Black стабильно
 загружается в Linux, UART-консоль работает, а boot chain понятен.
@@ -13,6 +13,7 @@
 ```text
 Hello, World module
   -> встроенный ADC AM335x через существующий драйвер и IIO
+  -> HC-06 Bluetooth UART lab через Linux tty
   -> внешний ADS1115 как бюджетный промышленный аналоговый вход
 ```
 
@@ -930,6 +931,106 @@ Callback-параметр позволяет задать custom set/get callbac
 вызваны при записи или чтении параметра. Это следующий уровень после обычного
 `module_param`.
 
+#### Подготовленный callback-параметр log_level
+
+В локальном исходнике `modules/hello/hello.c` подготовлен следующий учебный
+параметр:
+
+```text
+log_level: int, 0644, valid range 0..3
+```
+
+Он отличается от `verbose` тем, что запись через sysfs проходит через
+пользовательский `set` callback:
+
+```c
+static int log_level_set(const char *val, const struct kernel_param *kp)
+{
+    int new_level;
+    int ret;
+
+    ret = kstrtoint(val, 0, &new_level);
+    if (ret)
+        return ret;
+
+    if (new_level < 0 || new_level > 3)
+        return -EINVAL;
+
+    *((int *)kp->arg) = new_level;
+    pr_info("bbb_hello: log_level changed to %d\n", new_level);
+
+    return 0;
+}
+```
+
+Модель:
+
+```text
+echo 3 > /sys/module/hello/parameters/log_level
+  -> sysfs write
+  -> kernel parameter core
+  -> log_level_set()
+  -> validation
+  -> update variable
+  -> pr_info()
+```
+
+Обычный `module_param(verbose, bool, 0644)` просто меняет связанную переменную
+через стандартный обработчик типа `bool`. `module_param_cb` дает разработчику
+точку, где можно выполнить код именно в момент записи: проверить диапазон,
+отклонить значение через `-EINVAL`, залогировать изменение или синхронизировать
+состояние драйвера.
+
+Практический цикл на BeagleBone Black выполнен:
+
+```text
+rsync -> make -> modinfo -> insmod -> sysfs write -> dmesg -> rmmod
+```
+
+Важно не смешивать два уровня проверки:
+
+```text
+modinfo hello.ko
+  -> static/module metadata внутри файла .ko
+
+insmod/sysfs/dmesg
+  -> runtime-поведение модуля после загрузки в ядро
+```
+
+Если `modinfo` показывает:
+
+```text
+parm: log_level:Logging level from 0 to 3
+```
+
+это значит, что параметр объявлен и виден в metadata собранного `.ko`.
+Для `module_param_cb` тип может не отображаться в скобках, потому что параметр
+зарегистрирован через custom set/get callbacks, а не через стандартный
+`module_param(..., int, ...)`.
+Но это еще не доказывает, что callback-логика работает правильно. Диапазон
+`0..3`, возврат `-EINVAL`, вызов `log_level_set()` при записи через sysfs и
+строки в `dmesg` проверяются только runtime-командами после `insmod`.
+
+Проверенный результат:
+
+```text
+insmod log_level=2
+  -> log_level_set("2", kp)
+  -> bbb_hello_init() видит log_level == 2
+
+echo 3 > /sys/module/hello/parameters/log_level
+  -> log_level_set("3", kp)
+  -> значение обновляется до 3
+
+echo 9 > /sys/module/hello/parameters/log_level
+  -> log_level_set("9", kp)
+  -> callback возвращает -EINVAL
+  -> значение остается 3
+
+rmmod hello
+  -> sysfs-параметр log_level исчезает
+```
+
 #### Sysfs-представление параметра
 
 После загрузки модуля:
@@ -1333,7 +1434,61 @@ syscall
 Учебный вывод: для встроенной периферии чаще нужно не писать драйвер заново, а
 понять существующий драйвер, Device Tree, pinmux и ABI подсистемы ядра.
 
-## 3. Этап внешнего ADC
+## 3. Этап HC-06 Bluetooth UART
+
+После встроенного ADC добавляем отдельную лабораторную работу с модулем
+**HC-06**. Это не разработка нового Bluetooth-драйвера: HC-06 сам реализует
+Bluetooth SPP, а со стороны BeagleBone Black выглядит как обычное UART-
+устройство.
+
+Рабочая модель:
+
+```text
+смартфон app
+  -> Bluetooth SPP
+  -> HC-06
+  -> UART TX/RX
+  -> AM335x UART controller
+  -> Linux tty driver
+  -> /dev/ttyS*
+  -> userspace read/write
+```
+
+Что изучаем:
+
+- выбор свободного UART на BeagleBone Black;
+- pinmux и Device Tree/config-pin для UART-пинов;
+- уровни сигналов `3.3 V` и безопасное подключение `TX/RX/GND`;
+- настройку baudrate, `8N1` и отключение flow control;
+- работу с `/dev/ttyS*` через `minicom`, `picocom`, `stty`, `cat`, `echo`;
+- минимальную userspace-программу на C с `open()`, `read()`, `write()` и
+  `termios`.
+
+Минимальный результат:
+
+```text
+символы, отправленные со смартфона, приходят на BeagleBone через /dev/ttyS*
+BeagleBone отправляет ответ обратно на смартфон
+понятна цепочка: Device Tree/pinmux -> UART controller -> tty -> userspace
+```
+
+Важное ограничение: до практического подключения нужно проверить конкретную
+breakout-плату HC-06, ее питание и уровни `TXD/RXD`. Пины BeagleBone Black не
+являются `5 V tolerant`.
+
+Опциональное расширение после userspace-лабы:
+
+```text
+serdev client driver
+  -> probe()
+  -> отправка AT-команд
+  -> sysfs/debugfs для состояния учебного устройства
+```
+
+Но базовая цель этапа - понять UART/tty-путь данных, а не заменить штатные
+Bluetooth или UART-драйверы Linux.
+
+## 4. Этап внешнего ADC
 
 Финальный выбранный вариант - внешний ADC **ADS1115** и простая входная
 обвязка, собранная на макетной плате.
@@ -1367,7 +1522,7 @@ IIO values in userspace
 - поддерживается mainline Linux-драйвером `ti-ads1015`;
 - достаточно прост для учебного драйвера, но не сводится к `Hello, World`.
 
-## 4. Архитектура финального макета
+## 5. Архитектура финального макета
 
 Общая схема:
 
@@ -1425,7 +1580,7 @@ current input - / GND
 
 Такой диапазон остается ниже питания ADS1115 `3.3 V`.
 
-## 5. Компоненты для макета
+## 6. Компоненты для макета
 
 Базовый набор:
 
@@ -1451,7 +1606,7 @@ ADS1115 breakout module
 или лабораторный БП с контролем тока и мультиметром
 ```
 
-## 6. Драйверная цель
+## 7. Драйверная цель
 
 Путь разработки:
 
@@ -1472,7 +1627,7 @@ ADS1115 breakout module
 пишем не потому, что штатный плохой, а чтобы понять архитектуру Linux IIO и
 работу с реальным устройством.
 
-## 7. Пересчет в инженерные величины
+## 8. Пересчет в инженерные величины
 
 ADC измеряет напряжение. Дальше userspace может пересчитать электрический сигнал
 в физическую величину.
@@ -1502,7 +1657,7 @@ value = physical_min +
 прикладная логика уже может интерпретировать его как давление, температуру,
 уровень, расход или положение.
 
-## 8. Что пока не включаем в обязательный проект
+## 9. Что пока не включаем в обязательный проект
 
 HART, гальваническую изоляцию и промышленное питание `24 V` пока не делаем
 обязательными.
@@ -1525,18 +1680,21 @@ communication, изоляцию, питание, EMC и безопасность
 Device Tree -> I2C -> kernel driver -> IIO -> измерение -> пересчет
 ```
 
-## 9. Контрольные вопросы
+## 10. Контрольные вопросы
 
 1. Почему для встроенного ADC мы сначала изучаем существующий драйвер, а не
    пишем свой?
-2. Чем IIO отличается от простого character device?
-3. Почему ADS1115 при питании `3.3 V` нельзя подавать на вход больше `3.3 V`?
-4. Зачем делитель на входе `0-10 V`?
-5. Почему для `4-20 mA` нужен шунт?
-6. Где должен жить пересчет в bar, percent или degrees: в драйвере или в
+2. Почему HC-06 со стороны BeagleBone является UART-устройством, а не
+   самостоятельным Bluetooth-драйвером?
+3. Чем `/dev/ttyS*` отличается от IIO sysfs ABI?
+4. Чем IIO отличается от простого character device?
+5. Почему ADS1115 при питании `3.3 V` нельзя подавать на вход больше `3.3 V`?
+6. Зачем делитель на входе `0-10 V`?
+7. Почему для `4-20 mA` нужен шунт?
+8. Где должен жить пересчет в bar, percent или degrees: в драйвере или в
    userspace?
 
-## 10. Источники
+## 11. Источники
 
 - TI ADS1115 product page: https://www.ti.com/product/ADS1115
 - TI ADS1015/ADS1115 Linux driver: https://www.ti.com/tool/ADS1015SW-LINUX

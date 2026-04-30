@@ -2572,12 +2572,13 @@ mmcblk1boot1    2M
 ### План второй большой части курса
 
 После обсуждения финального направления для разработки модулей ядра принято
-решение строить вторую часть курса в три этапа:
+решение строить вторую часть курса в несколько этапов:
 
 ```text
 1. Hello, World module
 2. Встроенный ADC AM335x через существующий драйвер и IIO
-3. Внешний ADS1115 как бюджетный промышленный аналоговый вход
+3. HC-06 Bluetooth UART lab через Linux tty
+4. Внешний ADS1115 как бюджетный промышленный аналоговый вход
 ```
 
 От дорогого промышленного модуля CN0414/AD4111 на первом проходе отказались,
@@ -4540,3 +4541,362 @@ docs/index.html linguist-documentation
 
 Это подсказывает GitHub Linguist считать HTML-справочник документацией, чтобы он
 не перетягивал языковую статистику репозитория в сторону HTML.
+
+## 2026-04-29
+
+### Планирование HC-06 Bluetooth UART lab
+
+В дальний план курса добавлена отдельная будущая лабораторная работа с модулем
+**HC-06** после этапа встроенного ADC AM335x и перед внешним ADS1115.
+
+Принятое техническое уточнение: HC-06 не требует написания нового
+Bluetooth-драйвера Linux. Этот модуль сам реализует Bluetooth SPP, а со стороны
+BeagleBone Black выглядит как обычное UART-устройство.
+
+Учебная модель будущей лабораторной:
+
+```text
+смартфон app
+  -> Bluetooth SPP
+  -> HC-06
+  -> UART TX/RX
+  -> AM335x UART controller
+  -> Linux tty driver
+  -> /dev/ttyS*
+  -> userspace read/write
+```
+
+Цель этапа:
+
+- выбрать и включить свободный UART BeagleBone Black;
+- разобрать pinmux и Device Tree/config-pin для UART;
+- безопасно подключить `TX/RX/GND` с учетом уровней `3.3 V`;
+- принять символы со смартфона через Linux tty;
+- отправить ответ с BeagleBone Black обратно на смартфон;
+- написать минимальную userspace-программу на C через `termios`.
+
+К теме возвращаемся позже, когда будет завершен текущий блок по параметрам
+модулей и этап встроенного ADC/IIO.
+
+## 2026-04-30
+
+### Восстановление состояния после некорректного выхода
+
+При сверке после некорректного выхода обнаружено расхождение между документацией
+и локальным исходником:
+
+```text
+REPORT/NEXT_SESSION/course:
+  module_param_cb описан как следующий учебный шаг
+
+modules/hello/hello.c:
+  log_level через module_param_cb уже подготовлен локально
+```
+
+Принятое состояние:
+
+- `username: charp, 0444` и `verbose: bool, 0644` уже практически проверены на
+  BeagleBone Black;
+- `log_level: int, 0644` через `module_param_cb` есть в локальном исходнике;
+- `log_level` еще не считается практически проверенным, пока не выполнен цикл
+  `rsync -> make -> modinfo -> insmod -> sysfs write -> dmesg -> rmmod` на
+  BeagleBone Black.
+
+Смысл следующей практики: сравнить обычный `module_param` и `module_param_cb`.
+Обычный параметр меняет связанную переменную через стандартный обработчик, а
+callback-параметр дает драйверу выполнить собственный код в момент записи через
+sysfs: распарсить значение, проверить диапазон, вернуть `-EINVAL` при ошибке и
+залогировать успешное изменение.
+
+### Сборка hello module с module_param_cb
+
+Обновленный `modules/hello/hello.c` с параметром `log_level` передан на
+BeagleBone Black через `rsync`.
+
+Сборка выполнена на target:
+
+```sh
+make -C /lib/modules/$(uname -r)/build M=$PWD modules
+```
+
+Результат:
+
+```text
+CC [M]  /home/andrey/bbb-course/modules/hello/hello.o
+MODPOST /home/andrey/bbb-course/modules/hello/Module.symvers
+CC [M]  /home/andrey/bbb-course/modules/hello/hello.mod.o
+LD [M]  /home/andrey/bbb-course/modules/hello/hello.ko
+```
+
+Вывод: код с `module_param_cb` успешно собрался против headers текущего ядра
+`6.12.76-bone50`. Следующий шаг - проверить metadata через `modinfo` и
+убедиться, что параметр `log_level` появился в `.ko`.
+
+Важное разделение проверок:
+
+```text
+modinfo hello.ko
+  -> проверяет static/module metadata внутри .ko
+  -> показывает, что параметр объявлен и виден в файле модуля
+
+insmod/sysfs/dmesg
+  -> проверяют runtime-поведение уже загруженного модуля в ядре
+```
+
+То есть `modinfo` отвечает на вопрос:
+
+```text
+Собрался ли .ko так, что ядро видит объявленный параметр модуля?
+```
+
+Runtime-проверки отвечают на другие вопросы:
+
+```text
+Принял ли insmod значение log_level=2?
+Создался ли /sys/module/hello/parameters/log_level?
+Вызывается ли log_level_set() при записи через sysfs?
+Отклоняется ли неверное значение через -EINVAL?
+Появляется ли ожидаемая строка в dmesg?
+```
+
+Формула для курса:
+
+```text
+modinfo подтверждает наличие параметра в metadata .ko,
+а insmod/sysfs/dmesg подтверждают runtime-логику параметра.
+```
+
+Проверка `modinfo` на BeagleBone Black показала:
+
+```text
+filename:       /home/andrey/bbb-course/modules/hello/hello.ko
+description:    Minimal BeagleBone Black hello kernel module
+author:         Andrey
+license:        GPL
+name:           hello
+vermagic:       6.12.76-bone50 preempt mod_unload modversions ARMv7 thumb2 p2v8
+parm:           username:Name to print in the hello message (charp)
+parm:           verbose:Enable verbose hello module messages (bool)
+parm:           log_level:Logging level from 0 to 3
+```
+
+Вывод: `log_level` появился в metadata собранного `.ko`, значит параметр
+объявлен и виден для kernel module loader. Отсутствие `(int)` у `log_level` не
+считается ошибкой: параметр зарегистрирован через `module_param_cb` с custom
+callbacks, поэтому `modinfo` показывает описание параметра, но не обязательно
+показывает тип в той же форме, что у стандартного `module_param(..., int, ...)`.
+
+После добавления учебных комментариев к `struct kernel_param_ops` и
+`module_param_cb` модуль был повторно передан на BeagleBone Black и пересобран.
+Повторный `modinfo hello.ko` показал те же параметры:
+
+```text
+parm:           username:Name to print in the hello message (charp)
+parm:           verbose:Enable verbose hello module messages (bool)
+parm:           log_level:Logging level from 0 to 3
+```
+
+Вывод: комментарии не изменили metadata и runtime-логику модуля; `log_level`
+по-прежнему присутствует в собранном `.ko`.
+
+### Runtime-проверка log_level при insmod
+
+Модуль загружен с параметрами:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Yunin verbose=1 log_level=2
+```
+
+Фактический `dmesg`:
+
+```text
+hello: loading out-of-tree module taints kernel.
+bbb_hello: log_level changed to 2
+bbb_hello: init, username=Yunin
+bbb_hello: verbose mode is enabled
+bbb_hello: log_level=2
+```
+
+Вывод: параметр `log_level=2`, переданный в `insmod`, обработан через
+`log_level_set()` до вызова `bbb_hello_init()`. Поэтому init-функция уже видит
+обновленное значение `log_level == 2`.
+
+Строка:
+
+```text
+hello: loading out-of-tree module taints kernel.
+```
+
+ожидаема для внешнего модуля, собранного вне дерева исходников ядра. Это не
+ошибка загрузки.
+
+### Sysfs-представление log_level
+
+После повторной загрузки модуля с:
+
+```sh
+sudo /usr/sbin/insmod hello.ko username=Yunin verbose=1 log_level=2
+```
+
+проверен sysfs-параметр:
+
+```sh
+cat /sys/module/hello/parameters/log_level
+ls -l /sys/module/hello/parameters/log_level
+```
+
+Фактический результат:
+
+```text
+2
+-rw-r--r-- 1 root root 4096 Apr 30 12:12 /sys/module/hello/parameters/log_level
+```
+
+Вывод:
+
+```text
+модуль загружен
+  -> /sys/module/hello/parameters/log_level существует
+  -> текущее значение log_level равно 2
+  -> права 0644 отображаются как -rw-r--r--
+  -> root может менять параметр через sysfs
+```
+
+### Runtime-запись log_level через sysfs
+
+Проверена запись нового значения во время работы модуля:
+
+```sh
+echo 3 | sudo tee /sys/module/hello/parameters/log_level
+dmesg | tail -n 10
+cat /sys/module/hello/parameters/log_level
+```
+
+Фактический результат:
+
+```text
+3
+bbb_hello: log_level changed to 3
+3
+```
+
+Вывод:
+
+```text
+echo 3 > /sys/module/hello/parameters/log_level
+  -> sysfs write
+  -> kernel parameter core
+  -> log_level_set("3", kp)
+  -> значение принято
+  -> переменная log_level обновлена до 3
+  -> pr_info попал в dmesg
+```
+
+Это подтверждает главное отличие от обычного `module_param(verbose, bool,
+0644)`: callback-параметр выполняет пользовательский код именно в момент записи
+через sysfs.
+
+### Проверка валидации log_level
+
+Проверена попытка записать значение вне допустимого диапазона:
+
+```sh
+echo 9 | sudo tee /sys/module/hello/parameters/log_level
+dmesg | tail -n 10
+cat /sys/module/hello/parameters/log_level
+```
+
+Фактический результат:
+
+```text
+9
+tee: /sys/module/hello/parameters/log_level: Invalid argument
+bbb_hello: log_level must be between 0 and 3
+3
+```
+
+Интерпретация:
+
+- `tee` сначала печатает `9` в stdout, потому что он получил это значение на
+  вход;
+- запись в sysfs возвращает ошибку `Invalid argument`, потому что
+  `log_level_set()` вернул `-EINVAL`;
+- `pr_warn()` из callback попал в `dmesg`;
+- значение параметра осталось прежним: `3`.
+
+Вывод: `module_param_cb` позволяет не только реагировать на запись, но и
+отклонять невалидные runtime-значения без изменения состояния модуля.
+
+### Выгрузка hello после проверки module_param_cb
+
+После проверки runtime-записи и валидации модуль выгружен:
+
+```sh
+sudo /usr/sbin/rmmod hello
+dmesg | tail -n 10
+lsmod | grep hello
+cat /sys/module/hello/parameters/log_level
+```
+
+Фактический результат:
+
+```text
+bbb_hello: exit, username=Yunin
+bbb_hello: verbose mode was enabled
+lsmod | grep hello -> no output
+cat: /sys/module/hello/parameters/log_level: No such file or directory
+```
+
+Вывод:
+
+```text
+rmmod hello
+  -> ядро вызвало bbb_hello_exit()
+  -> модуль исчез из lsmod
+  -> /sys/module/hello/parameters/log_level удален
+```
+
+Этап `module_param_cb` закрыт:
+
+- `modinfo` подтвердил наличие `log_level` в metadata `.ko`;
+- `insmod log_level=2` вызвал `log_level_set()` до `bbb_hello_init()`;
+- sysfs показал текущее значение и права `0644`;
+- runtime-запись `3` вызвала callback и обновила значение;
+- невалидное значение `9` вернуло `-EINVAL` и не изменило состояние;
+- `rmmod` удалил модуль и его sysfs-представление.
+
+### Точка остановки
+
+На этом месте сессия остановлена.
+
+Состояние на конец работы:
+
+```text
+hello module выгружен
+lsmod | grep hello -> no output
+/sys/module/hello/parameters/log_level отсутствует
+```
+
+Закрытые темы текущего блока:
+
+- обычный read-only параметр `username`;
+- обычный writable параметр `verbose`;
+- callback-параметр `log_level`;
+- различие между `modinfo` metadata и runtime-проверками;
+- `module_param_cb`, `struct kernel_param_ops`, `.set/.get` callbacks;
+- runtime-валидация с возвратом `-EINVAL`.
+
+Следующая сессия начинается не с повторной проверки `log_level`, а с нового
+содержательного шага: уровни kernel logging и диагностика в модуле
+`hello` (`pr_info`, `pr_warn`, `pr_err`, `pr_debug`, базовая идея
+dynamic debug).
+
+Рабочий формат следующих команд:
+
+```text
+HOST -> окно Linux host с репозиторием
+BBB  -> отдельное окно терминала BeagleBone Black
+```
+
+Удаленные команды вида `ssh andrey@10.129.1.152 'command'` не использовать по
+умолчанию; команды для платы давать в окно `BBB`.

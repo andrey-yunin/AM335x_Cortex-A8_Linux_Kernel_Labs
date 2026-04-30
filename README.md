@@ -57,13 +57,14 @@ Core documents:
 
 ### Part 2. Kernel Modules and Drivers
 
-20. [Kernel modules and ADC roadmap](course/20-kernel-modules-roadmap.md)
+20. [Kernel modules, UART, and ADC roadmap](course/20-kernel-modules-roadmap.md)
 
 Planned route:
 
 ```text
 Hello, World kernel module
   -> AM335x built-in ADC through the existing Linux IIO driver
+  -> HC-06 Bluetooth UART lab through Linux tty
   -> external ADS1115 ADC as a budget industrial analog input
 ```
 
@@ -87,9 +88,10 @@ The final practical target is an educational analog input module:
 - First out-of-tree `hello` kernel module has been built on the BeagleBone
   Black, inspected with `modinfo`, loaded with `insmod`, verified through
   `dmesg`/`lsmod`, and unloaded with `rmmod`.
-- The `hello` module now has two tested parameters:
-  `username: charp, 0444` and `verbose: bool, 0644`; sysfs read/write behavior
-  and post-`rmmod` cleanup have been verified.
+- The `hello` module now has three tested parameters:
+  `username: charp, 0444`, `verbose: bool, 0644`, and `log_level: int, 0644`.
+  The `log_level` parameter uses `module_param_cb`; metadata, `insmod`, sysfs
+  read/write, validation, `dmesg`, and post-`rmmod` cleanup have been verified.
 
 Current host-target route:
 

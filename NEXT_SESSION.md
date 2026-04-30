@@ -1,6 +1,6 @@
 # Playbook следующей сессии
 
-Дата подготовки: 2026-04-28.
+Дата подготовки: 2026-04-30.
 
 Цель playbook - быстро вернуться к работе после паузы и не восстанавливать
 контекст по памяти.
@@ -28,7 +28,19 @@
   модуль;
 - проверено: `/sys/module/hello/parameters/username` доступен только на чтение;
 - проверено: `/sys/module/hello/parameters/verbose` доступен root на запись;
-- проверено: после `rmmod hello` sysfs-точки модуля исчезают.
+- проверено: после `rmmod hello` sysfs-точки модуля исчезают;
+- в `hello` добавлен callback-параметр `log_level: int, 0644` через
+  `module_param_cb`;
+- проверено: `modinfo` показывает `log_level` в metadata `.ko`;
+- проверено: `insmod hello.ko username=Yunin verbose=1 log_level=2` вызывает
+  `log_level_set()` до `bbb_hello_init()`;
+- проверено: `/sys/module/hello/parameters/log_level` показывает значение и
+  права `-rw-r--r--`;
+- проверено: runtime-запись `echo 3 | sudo tee .../log_level` вызывает callback
+  и обновляет значение;
+- проверено: невалидное значение `9` возвращает `Invalid argument`, пишет
+  предупреждение в `dmesg` и не меняет значение;
+- проверено: после `rmmod hello` sysfs-точка `log_level` исчезает.
 
 Используемый образ:
 
@@ -165,6 +177,7 @@ Linux host / VS Code
 ```text
 username: charp, 0444
 verbose:  bool,  0644
+log_level: int,   0644 через module_param_cb
 ```
 
 Ключевая модель sysfs:
@@ -263,30 +276,19 @@ mmcblk1   -> eMMC
 
 ## Быстрый старт разработки модулей
 
-Окно 1 - интерактивный SSH на BeagleBone:
-
-```sh
-ssh andrey@10.129.1.152
-cd ~/bbb-course/modules/hello
-hostname
-uname -r
-pwd
-```
-
-Ожидаемо:
+Работаем в двух терминалах:
 
 ```text
-BeagleBone
-6.12.76-bone50
-/home/andrey/bbb-course/modules/hello
+HOST -> Linux host, репозиторий /home/andrey/projects/BeagleBone_Black
+BBB  -> отдельный терминал BeagleBone Black, каталог ~/bbb-course/modules/hello
 ```
 
-Окно 2 - Linux host в репозитории:
+### HOST
 
 ```sh
 cd ~/projects/BeagleBone_Black
 pwd
-sed -n '1,180p' modules/hello/hello.c
+sed -n '1,220p' modules/hello/hello.c
 ```
 
 Ожидаемый host path:
@@ -295,118 +297,99 @@ sed -n '1,180p' modules/hello/hello.c
 /home/andrey/projects/BeagleBone_Black
 ```
 
-Перед практикой проверить маршрут:
+Если перед практикой нужно восстановить временный маршрут к плате:
 
 ```sh
 sh scripts/bbb-route.sh check
-```
-
-Если снова видно `outline-tun1`, восстановить временный route:
-
-```sh
 sh scripts/bbb-route.sh apply
 ```
 
-Синхронизация исходников:
+`apply` нужен только если `check` снова показывает `outline-tun1`.
+
+### BBB
 
 ```sh
-rsync -av modules/hello/ andrey@10.129.1.152:/home/andrey/bbb-course/modules/hello/
-```
-
-Сборка на BBB:
-
-```sh
-make -C /lib/modules/$(uname -r)/build M=$PWD modules
-```
-
-Проверка metadata:
-
-```sh
-/usr/sbin/modinfo hello.ko
-```
-
-Ожидаемые параметры:
-
-```text
-parm: username:Name to print in the hello message (charp)
-parm: verbose:Enable verbose hello module messages (bool)
-```
-
-Проверка загрузки:
-
-```sh
-sudo /usr/sbin/insmod hello.ko username=Yunin verbose=1
-dmesg | tail -n 20
-cat /sys/module/hello/parameters/username
-cat /sys/module/hello/parameters/verbose
-ls -l /sys/module/hello/parameters/username /sys/module/hello/parameters/verbose
+cd ~/bbb-course/modules/hello
+hostname
+uname -r
+pwd
+lsmod | grep hello
 ```
 
 Ожидаемо:
 
 ```text
-bbb_hello: init, username=Yunin
-bbb_hello: verbose mode is enabled
-username -> Yunin
-verbose  -> Y
-username permissions -> -r--r--r--
-verbose permissions  -> -rw-r--r--
+BeagleBone
+6.12.76-bone50
+/home/andrey/bbb-course/modules/hello
+lsmod | grep hello -> no output
 ```
 
-Проверка runtime-изменения `verbose`:
-
-```sh
-echo 0 | sudo tee /sys/module/hello/parameters/verbose
-cat /sys/module/hello/parameters/verbose
-```
-
-Ожидаемо:
-
-```text
-0
-N
-```
-
-Выгрузка:
+Если `hello` все еще загружен, выгрузить перед новой практикой:
 
 ```sh
 sudo /usr/sbin/rmmod hello
-dmesg | tail -n 20
-lsmod | grep hello
-cat /sys/module/hello/parameters/username
 ```
 
-Ожидаемо:
+### Последняя проверенная точка
+
+`hello.ko` с параметрами `username`, `verbose` и `log_level` уже был собран и
+проверен на BeagleBone Black. Этап `module_param_cb` закрыт.
+
+Ключевая формула:
 
 ```text
-bbb_hello: exit, username=Yunin
-lsmod | grep hello -> no output
-cat .../username -> No such file or directory
+modinfo подтверждает наличие параметра в metadata .ko,
+а insmod/sysfs/dmesg подтверждают runtime-логику параметра.
+```
+
+Проверенный результат для `log_level`:
+
+```text
+insmod log_level=2
+  -> log_level_set("2", kp)
+  -> bbb_hello_init() видит log_level == 2
+
+echo 3 > /sys/module/hello/parameters/log_level
+  -> log_level_set("3", kp)
+  -> значение обновляется до 3
+
+echo 9 > /sys/module/hello/parameters/log_level
+  -> log_level_set("9", kp)
+  -> callback возвращает -EINVAL
+  -> значение остается 3
+
+rmmod hello
+  -> /sys/module/hello/parameters/log_level исчезает
 ```
 
 ## Следующий учебный шаг
 
 Linux-side часть загрузки, Device Tree и runtime-проверки уже разобраны.
 Host-target workflow закрыт. Первый `Hello, World` kernel module собран и
-проверен. Read-only и writable параметры модуля разобраны и проверены.
-Рекомендуемый следующий этап - `module_param_cb`.
+проверен. Read-only, writable и callback-параметры модуля разобраны и
+проверены.
+
+Рекомендуемый следующий этап - аккуратная диагностика в kernel module:
+`pr_info()`, `pr_warn()`, `pr_err()`, `pr_debug()` и базовая идея dynamic debug.
 
 Цель этапа:
 
-- понять отличие обычного `module_param` от callback-параметра;
-- добавить custom set/get callback для отдельного учебного параметра;
-- проверить, что callback вызывается именно в момент записи через sysfs;
-- добавить валидацию значения;
+- понять уровни сообщений ядра и когда использовать каждый уровень;
+- заменить часть учебных сообщений на более подходящие уровни;
+- добавить `pr_debug()` для подробной диагностики;
+- проверить, почему `pr_debug()` обычно не виден без включения debug;
 - передать обновленный модуль на BeagleBone через `rsync`;
 - пересобрать модуль на BeagleBone под `6.12.76-bone50`;
-- проверить `modinfo`, `insmod`, запись через sysfs, `dmesg` и `rmmod`;
+- проверить `insmod`, `dmesg`, runtime-поведение и `rmmod`;
 - не обновлять kernel-пакеты без отдельного решения.
 
-Первые команды для следующей практики на хосте:
+Первые команды для следующей практики:
+
+HOST:
 
 ```sh
 ip route get 10.129.1.152
-ssh andrey@10.129.1.152 'hostname; uname -r; whoami'
 sed -n '1,180p' modules/hello/hello.c
 ```
 
@@ -414,6 +397,16 @@ sed -n '1,180p' modules/hello/hello.c
 
 ```sh
 sudo ip route replace 10.129.1.152/32 dev eno0 src 10.129.1.110 table 7113
+```
+
+BBB:
+
+```sh
+cd ~/bbb-course/modules/hello
+hostname
+uname -r
+whoami
+lsmod | grep hello
 ```
 
 ## Дальний план курса
@@ -426,10 +419,27 @@ sudo ip route replace 10.129.1.152/32 dev eno0 src 10.129.1.110 table 7113
 ```text
 Hello, World module
   -> встроенный ADC AM335x через существующий драйвер и IIO
+  -> HC-06 Bluetooth UART lab через Linux tty
   -> внешний ADS1115 как учебный промышленный аналоговый вход
 ```
 
 Подробный план второй части: `course/20-kernel-modules-roadmap.md`.
+
+HC-06 добавлен именно как будущая UART/tty-лаба, а не как разработка нового
+Bluetooth-драйвера. Ожидаемая модель:
+
+```text
+смартфон
+  -> Bluetooth SPP
+  -> HC-06
+  -> UART TX/RX
+  -> AM335x UART controller
+  -> Linux tty
+  -> /dev/ttyS*
+  -> userspace read/write
+```
+
+К этой теме возвращаемся после этапа встроенного ADC AM335x.
 
 Выбранный финальный макет:
 

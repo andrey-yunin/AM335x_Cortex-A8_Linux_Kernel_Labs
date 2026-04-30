@@ -429,8 +429,8 @@
           <div class="details-body">
             <ul class="doc-list">
               <li>
-                <strong><a href="../course/20-kernel-modules-roadmap.md">20. Roadmap: kernel modules and ADC</a></strong>
-                <span>Hello World module, встроенный ADC, внешний ADS1115, IIO и инженерные величины.</span>
+                <strong><a href="../course/20-kernel-modules-roadmap.md">20. Roadmap: kernel modules, UART and ADC</a></strong>
+                <span>Hello World module, встроенный ADC, HC-06 UART, внешний ADS1115, IIO и инженерные величины.</span>
               </li>
             </ul>
           </div>
@@ -688,8 +688,11 @@ sh scripts/bbb-route.sh delete</code></pre>
             </div>
 
             <div class="cmd" data-title="Проверить SSH">
-              <div class="cmd-head"><span>Проверить SSH без интерактивной сессии</span><button class="copy">Copy</button></div>
-              <pre><code>ssh andrey@10.129.1.152 'hostname; uname -r; whoami'</code></pre>
+              <div class="cmd-head"><span>Войти на BBB и проверить окружение в окне платы</span><button class="copy">Copy</button></div>
+              <pre><code>ssh andrey@10.129.1.152
+hostname
+uname -r
+whoami</code></pre>
             </div>
 
             <div class="cmd" data-title="Интерактивный SSH">
@@ -701,8 +704,8 @@ sh scripts/bbb-route.sh delete</code></pre>
             <div class="cmd" data-title="Проверить SCP">
               <div class="cmd-head"><span>Передать тестовый файл с хоста на плату</span><button class="copy">Copy</button></div>
               <pre><code>printf 'bbb host to target transfer test\n' > /tmp/bbb_ssh_transfer_test.txt
-scp /tmp/bbb_ssh_transfer_test.txt andrey@10.129.1.152:/home/andrey/
-ssh andrey@10.129.1.152 'cat /home/andrey/bbb_ssh_transfer_test.txt'</code></pre>
+scp /tmp/bbb_ssh_transfer_test.txt andrey@10.129.1.152:/home/andrey/</code></pre>
+              <p>Проверку файла выполнить в окне BBB: <code>cat /home/andrey/bbb_ssh_transfer_test.txt</code>.</p>
             </div>
           </div>
         </details>
@@ -839,11 +842,11 @@ cat /sys/module/hello/parameters/username</code></pre>
         <ul class="concept-list">
           <li class="item">
             <strong>Hello module completed</strong>
-            <span>Первый out-of-tree модуль собран на BBB; <code>username</code> и <code>verbose</code> проверены через <code>modinfo</code>, <code>insmod</code>, <code>dmesg</code>, sysfs и <code>rmmod</code>.</span>
+            <span>Первый out-of-tree модуль собран на BBB; <code>username</code>, <code>verbose</code> и <code>log_level</code> проверены через <code>modinfo</code>, <code>insmod</code>, <code>dmesg</code>, sysfs и <code>rmmod</code>.</span>
           </li>
           <li class="item">
             <strong>module_param_cb</strong>
-            <span>Следующий учебный шаг: custom set/get callbacks, реакция на запись через sysfs и валидация значения.</span>
+            <span><code>log_level</code> через custom set/get callbacks проверен: runtime-запись вызывает callback, невалидное значение возвращает ошибку.</span>
           </li>
           <li class="item">
             <strong>Дальше debugging</strong>
